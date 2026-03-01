@@ -82,3 +82,23 @@
 1. 两种工作模式
    · 内联模式 (Inline)：插件直接使用你正在对话的AI（主API）来执行审查任务。AI的回复中除了正常的对话内容，还会夹带<world_update>指令。插件执行指令后，会从AI消息中剥离这些指令，你在聊天界面看不到它们，体验很无缝。（我没测试过，这个功能无论在任何一张卡里都会消耗主api的注意力可能导致正文质量下降/我认为的）
    · 外部模式 (External)：你可以配置一个专门的API（如一个更便宜或更擅长总结的模型）在后台默默进行世界书的审查和更新，不影响你与主AI的对话。
+
+---
+
+## 重构进度（v2.1 / v3.0）
+
+当前仓库已新增以下重构交付：
+
+1. 基线与回归文档：
+   - `docs/phase0-baseline.md`
+   - `docs/regression-checklist.md`
+   - `docs/test-matrix.md`
+   - `docs/release-playbook.md`
+2. v3 模块化骨架：
+   - `src/WBM/`（按 `core/services/infra/ui` 拆分）
+3. v2.1 稳定性补丁：
+   - 修复 `uid=0` 判空问题
+   - 修复 `managed` 模式未绑定聊天世界书的问题
+   - 收敛 `MutationObserver` 与 `EventBridge` 的重复触发
+   - 修复 `window.WBM.openUI/closeUI` 对新 UI 对象的调用
+   - 补齐卸载保护初始化

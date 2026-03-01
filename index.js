@@ -1706,7 +1706,7 @@
                 var target = Search.exact(entries, names[i]);
                 if (target) {
                     var uid = Book.uid(target);
-                    if (uid) {
+                    if (uid != null) {
                         try {
                             await Book.deleteEntry(bookName, uid);
                             this.markDeleted(bookName, names[i]);
@@ -2319,7 +2319,12 @@
     // ╚═══════════════════════════════════════════════════════╝
 
     var Book = {
-        uid: function (e) { return e ? (e.uid || e.id || null) : null; },
+        uid: function (e) {
+            if (!e) return null;
+            if (e.uid != null) return e.uid;
+            if (e.id != null) return e.id;
+            return null;
+        },
 
         _full: function (fields) {
             var f = {}, k;
@@ -2358,13 +2363,36 @@
             try {
                 if (tt === 'managed') {
                     var ex = NativeWI.getChatBookName();
-                    if (ex) { baseName = ex; }
-                    else {
+                    if (ex) {
+                        baseName = ex;
+                    } else {
                         try {
-                            var cb = _safeCharBooks(); var prefix = cb.primary || 'WB';
+                            var cb = _safeCharBooks();
+                            var prefix = cb.primary || 'WB';
                             var newName = prefix + '_WBM_' + _formatDate();
-                            await WI.createBook(newName);
-                            baseName = newName;
+                            if (typeof getOrCreateChatWorldbook === 'function') {
+                                baseName = await getOrCreateChatWorldbook('current', newName);
+                            } else {
+                                try {
+                                    await WI.createBook(newName);
+                                } catch (createErr) {
+                                    _warn('managed: 创建世界书失败（可能已存在）: ' + createErr.message);
+                                }
+                                baseName = newName;
+                                if (typeof rebindChatWorldbook === 'function') {
+                                    try {
+                                        await rebindChatWorldbook('current', baseName);
+                                    } catch (bindErr) {
+                                        _warn('managed: 绑定聊天世界书失败: ' + bindErr.message);
+                                    }
+                                } else if (typeof setChatLorebook === 'function') {
+                                    try {
+                                        await setChatLorebook(baseName);
+                                    } catch (bindErr2) {
+                                        _warn('managed: setChatLorebook 失败: ' + bindErr2.message);
+                                    }
+                                }
+                            }
                         } catch (e) { _warn('创建世界书失败: ' + e.message); }
                     }
                 } else if (tt === 'charPrimary') {
@@ -2428,7 +2456,7 @@
         },
 
         updateEntry: async function (bk, entry) {
-            var uid = this.uid(entry); if (!uid) throw new Error('缺少uid');
+            var uid = this.uid(entry); if (uid == null) throw new Error('缺少uid');
             if (entry.depth != null) entry.context = entry.depth;
             else if (entry.context != null) entry.depth = entry.context;
             await WI.updateLorebookEntry(bk, entry);
@@ -2980,7 +3008,7 @@
             } else if (a === 'delete') {
                 var t2 = Search.exact(entries, n);
                 if (!t2) return { action: a, entry_name: n, status: 'skipped', reason: '未找到' };
-                var uid = Book.uid(t2); if (!uid) return { action: a, entry_name: n, status: 'error', reason: '无uid' };
+                var uid = Book.uid(t2); if (uid == null) return { action: a, entry_name: n, status: 'error', reason: '无uid' };
                 if (RT.cfg.confirmDelete && !opts.isManual && !opts.skipApproval) {
                     _log('delete: 安全保护拦截「' + n + '」→ 加入审核队列');
                     PendingQueue.add([cmd], opts.floor || RT.lastAiFloor, bk, opts.rawReply || '');
@@ -3263,7 +3291,8 @@
                 var st2 = _isOn(e) ? '✅启用' : '❌禁用';
                 var dep = _dep(e); dep = dep != null ? dep : '?';
                 var skeys = _getSecondaryKeys(e);
-                var uid = Book.uid(e) || '?';
+                var uid = Book.uid(e);
+                if (uid == null) uid = '?';
 
                 lines.push('');
                 var isLocked = RT.cfg.entryLockEnabled && Store.loadLockedEntries(bk).indexOf(_dn(e)) !== -1;
@@ -3812,29 +3841,34 @@
         _observer = new MutationObserver(function () {
             if (debounceTimer) clearTimeout(debounceTimer);
             debounceTimer = setTimeout(function () {
-                // 检测聊天切换
+                var useObserverFallback = !(typeof EventBridge !== 'undefined' && EventBridge._bound);
                 var cid = _getChatId();
-                if (cid && RT._lastChatId && cid !== RT._lastChatId) {
-                    _log('检测到聊天切换: ' + RT._lastChatId + ' → ' + cid);
-                    RT.lastAiFloor = 0;
-                    RT.lastProcessedAiFloor = 0;
-                    RT.nextUpdateAiFloor = 0;
-                    // ★ 清理临时数据
-                    RT.backendChats = [];
-                    RT.debugHistory = [];
-                    RT.lastDebug = null;
+                if (useObserverFallback) {
+                    // 检测聊天切换
+                    if (cid && RT._lastChatId && cid !== RT._lastChatId) {
+                        _log('检测到聊天切换: ' + RT._lastChatId + ' → ' + cid);
+                        RT.lastAiFloor = 0;
+                        RT.lastProcessedAiFloor = 0;
+                        RT.nextUpdateAiFloor = 0;
+                        // ★ 清理临时数据
+                        RT.backendChats = [];
+                        RT.debugHistory = [];
+                        RT.lastDebug = null;
+                    }
                 }
                 RT._lastChatId = cid;
 
                 var af = _aiFloor();
 
-                // ★ 楼层增加 → 触发更新检测
-                if (af > RT.lastAiFloor) {
-                    Sched.onNew();
-                }
-                // ★ 楼层减少 → 调度状态重算（消息被删除）
-                else if (af < RT.lastAiFloor) {
-                    Sched.onMessageDeleted(null);
+                if (useObserverFallback) {
+                    // ★ 楼层增加 → 触发更新检测
+                    if (af > RT.lastAiFloor) {
+                        Sched.onNew();
+                    }
+                    // ★ 楼层减少 → 调度状态重算（消息被删除）
+                    else if (af < RT.lastAiFloor) {
+                        Sched.onMessageDeleted(null);
+                    }
                 }
             }, 1500);
         });
@@ -3973,7 +4007,7 @@ var WBM_ICON_SVG = '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg
     // ║  §15  UI 系统                                         ║
     // ╚═══════════════════════════════════════════════════════╝
 
-    var UI = {
+    var LegacyPanelUI = {
         _injected: false,
 
         toggle: function () {
@@ -4210,7 +4244,8 @@ var WBM_ICON_SVG = '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg
                 var preview = (e.content || '').substring(0, 80).replace(/\n/g, ' ');
                 var dep = _dep(e); dep = dep != null ? dep : '?';
                 var mode = _isCon(e) ? '🔵' : '🟢';
-                var uid = Book.uid(e) || '?';
+                var uid = Book.uid(e);
+                if (uid == null) uid = '?';
 
                 var badges = '<span class="wbm-badge">' + mode + ' d:' + dep + ' o:' + _ord(e) + '</span>';
                 if (e.sticky != null) badges += '<span class="wbm-badge">📌' + e.sticky + '</span>';
@@ -4417,6 +4452,8 @@ var WBM_ICON_SVG = '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg
         
         this.switchTab(0);}catch(e){_err('UI.build',e);}},
         toggle:function(){RT.panelOpen=!RT.panelOpen;if(this.ov)$(this.ov).toggleClass('open',RT.panelOpen);if(RT.panelOpen)this.refresh();},
+        open:function(){if(!RT.panelOpen)this.toggle();},
+        close:function(){if(RT.panelOpen)this.toggle();},
         switchTab:function(idx){RT.activeTab=idx;if(this.pn)$(this.pn).find('.'+P+'-tab').removeClass('act').eq(idx).addClass('act');this.refresh();},
         refresh:function(){if(!this.bd)return;this.bd.innerHTML='';var c=this.bd;try{switch(RT.activeTab){case 0:this._safeAsync(c,this._tEntries.bind(this,c));break;case 1:this._tPrompts(c);break;case 2:this._tAPI(c);break;case 3:this._tSettings(c);break;case 4:this._tBackend(c);break;case 5:this._tDebug(c);break;case 6:this._tLog(c);break;}}catch(e){c.textContent='Error: '+e.message;}this.status();},
         _safeAsync:function(c,fn){try{var p=fn();if(p&&typeof p.catch==='function')p.catch(function(e){c.innerHTML='';c.appendChild(UI.el('div',P+'-err-box','错误: '+e.message));});}catch(e){c.textContent='Error: '+e.message;}},
@@ -4436,7 +4473,7 @@ var WBM_ICON_SVG = '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg
         var sRow=this.el('div',P+'-row');sRow.style.cssText='margin-bottom:6px;gap:12px';sRow.appendChild(this.el('span',P+'-tag '+P+'-tgy','共 '+vis.length));sRow.appendChild(this.el('span',P+'-tag '+P+'-tbl','🔵永久 '+conC));sRow.appendChild(this.el('span',P+'-tag '+P+'-tgr','🟢关键词 '+(vis.length-conC)));if(disC>0)sRow.appendChild(this.el('span',P+'-tag '+P+'-trd','⏸禁用 '+disC));w.appendChild(sRow);
         var lw=this.el('div',P+'-card');lw.style.cssText='max-height:400px;overflow-y:auto;padding:0';
         var renderList=function(filter){lw.innerHTML='';var items=filter?Search.find(vis,filter).map(function(r){return r.entry;}):vis;if(!items.length){lw.appendChild(self.el('div',P+'-empty',filter?'未找到':'空'));return;}
-        items.forEach(function(e){var uid=Book.uid(e),en=_isOn(e),isCon=_isCon(e),dn=_dn(e);var depV=_dep(e),depS=depV!=null?String(depV):'?';var ek=_getKeys(e);var wrapper=self.el('div');var row=self.el('div',P+'-ei'+(en?'':' dis'));var ck=self.chk(en);if(!RT.depsL2)ck.disabled=true;ck.onchange=async function(){if(!uid){ck.checked=!ck.checked;return;}try{await Book.setField(bk,uid,'enabled',ck.checked);}catch(err){alert(err.message);ck.checked=!ck.checked;}};row.appendChild(ck);var ne=self.el('span',P+'-en',dn);ne.style.cursor='pointer';row.appendChild(ne);row.appendChild(self.el('span',P+'-tag '+P+'-tgy','d:'+depS));row.appendChild(self.el('span',P+'-tag '+P+'-tgy','o:'+_ord(e)));row.appendChild(self.el('span',P+'-tag '+(isCon?P+'-tbl':P+'-tgr'),isCon?'🔵永久':'🟢关键词'));var eb=self.btn('✏️',P+'-bg',function(){self._entryEditor(w,bk,e);});if(!RT.depsL2)eb.disabled=true;row.appendChild(eb);var db=self.btn('🗑',P+'-bd2',async function(){if(!uid)return;if(RT.cfg.confirmDelete&&!confirm('删除「'+dn+'」？'))return;try{await Book.deleteEntry(bk,uid);self.refresh();}catch(err){alert(err.message);}});if(!RT.depsL2)db.disabled=true;row.appendChild(db);wrapper.appendChild(row);
+        items.forEach(function(e){var uid=Book.uid(e),en=_isOn(e),isCon=_isCon(e),dn=_dn(e);var depV=_dep(e),depS=depV!=null?String(depV):'?';var ek=_getKeys(e);var wrapper=self.el('div');var row=self.el('div',P+'-ei'+(en?'':' dis'));var ck=self.chk(en);if(!RT.depsL2)ck.disabled=true;ck.onchange=async function(){if(uid==null){ck.checked=!ck.checked;return;}try{await Book.setField(bk,uid,'enabled',ck.checked);}catch(err){alert(err.message);ck.checked=!ck.checked;}};row.appendChild(ck);var ne=self.el('span',P+'-en',dn);ne.style.cursor='pointer';row.appendChild(ne);row.appendChild(self.el('span',P+'-tag '+P+'-tgy','d:'+depS));row.appendChild(self.el('span',P+'-tag '+P+'-tgy','o:'+_ord(e)));row.appendChild(self.el('span',P+'-tag '+(isCon?P+'-tbl':P+'-tgr'),isCon?'🔵永久':'🟢关键词'));var eb=self.btn('✏️',P+'-bg',function(){self._entryEditor(w,bk,e);});if(!RT.depsL2)eb.disabled=true;row.appendChild(eb);var db=self.btn('🗑',P+'-bd2',async function(){if(uid==null)return;if(RT.cfg.confirmDelete&&!confirm('删除「'+dn+'」？'))return;try{await Book.deleteEntry(bk,uid);self.refresh();}catch(err){alert(err.message);}});if(!RT.depsL2)db.disabled=true;row.appendChild(db);wrapper.appendChild(row);
         var det=self.el('div',P+'-edet');det.innerHTML='<div class="'+P+'-edet-field"><b>关键词:</b> '+_esc(ek||'无')+'</div><div class="'+P+'-edet-field"><b>深度:</b> '+depS+' | <b>排序:</b> '+_ord(e)+' | <b>模式:</b> '+(isCon?'🔵永久':'🟢关键词')+' | <b>状态:</b> '+(en?'✅':'⏸')+' | <b>constant:</b> '+JSON.stringify(e.constant)+' | <b>selective:</b> '+JSON.stringify(e.selective)+'</div>'+(e.comment?'<div class="'+P+'-edet-field"><b>备忘:</b> '+_esc(e.comment)+'</div>':'')+'<div class="'+P+'-edet-field"><b>内容:</b></div><div class="'+P+'-dbg">'+_esc(e.content||'(空)')+'</div>';
         ne.onclick=function(){det.classList.toggle('open');};wrapper.appendChild(det);lw.appendChild(wrapper);});};si.oninput=function(){renderList(si.value.trim());};renderList('');w.appendChild(lw);c.appendChild(w);},
 
@@ -4631,6 +4668,7 @@ var WBM_ICON_SVG = '<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg
     function init() {
         _log('WBM 初始化中…');
         loadRT();
+        _initUnloadProtection();
         WI.init();
         injectCSS();
         checkDeps();
