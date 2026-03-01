@@ -18,6 +18,7 @@ declare const deleteWorldbookEntries:
     ) => Promise<{ worldbook: WorldbookEntryLike[]; deleted_entries: WorldbookEntryLike[] }>)
   | undefined;
 
+// 世界书仓储抽象，屏蔽具体实现细节
 export interface WorldbookRepository {
   getEntries(bookName: string): Promise<WorldbookEntryLike[]>;
   addEntry(bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void>;
@@ -25,6 +26,7 @@ export interface WorldbookRepository {
   deleteEntry(bookName: string, uid: number | string): Promise<void>;
 }
 
+// Tavern/SillyTavern 环境下的世界书仓储实现
 export class TavernWorldbookRepository implements WorldbookRepository {
   constructor(private readonly logger: LoggerLike) {}
 

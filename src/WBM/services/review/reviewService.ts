@@ -1,11 +1,13 @@
 import type { LoggerLike, WorldUpdateCommand } from '../../core/types';
 import { WorldUpdateParser } from '../parser/worldUpdateParser';
 
+// 发送给模型的聊天消息结构
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 
+// AI 调用抽象，便于切换主 API / 外部 API
 export interface AiClient {
   call(messages: ChatMessage[]): Promise<string>;
 }
