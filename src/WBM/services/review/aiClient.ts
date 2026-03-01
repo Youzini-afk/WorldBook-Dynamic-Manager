@@ -14,7 +14,7 @@ export class TavernAiClient implements AiClient {
       });
       return String(output ?? '').trim();
     }
-    this.logger.warn('TavernHelper.generateRaw unavailable, returning empty response');
+    this.logger.warn('TavernHelper.generateRaw 不可用，返回空响应');
     return '';
   }
 }

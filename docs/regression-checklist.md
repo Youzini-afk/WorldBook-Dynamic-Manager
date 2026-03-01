@@ -1,36 +1,36 @@
-# Regression Checklist
+# 回归检查清单
 
-## Core Flow
+## 核心流程
 
-1. Open panel from floating button and extension menu.
-2. Select each target type (`charPrimary`, `charAdditional`, `global`, `managed`).
-3. Manual review creates commands and executes successfully.
-4. External mode receives valid response and writes to worldbook.
-5. Inline mode strips `<world_update>` blocks from rendered message.
+1. 通过悬浮按钮和扩展菜单都能打开面板。
+2. 目标类型 `charPrimary`、`charAdditional`、`global`、`managed` 均可选择并生效。
+3. 手动审核可生成并执行指令。
+4. 外部模式能收到有效响应并写入世界书。
+5. 内联模式会从渲染消息中剥离 `<world_update>` 代码块。
 
-## Command Actions
+## 指令动作
 
-1. `create` creates a new entry.
-2. `update` updates existing content and metadata.
-3. `delete` removes entry (with confirmation when enabled).
-4. `patch` executes content operations and key operations.
-5. Invalid/empty command payload is skipped without crash.
+1. `create` 能创建新条目。
+2. `update` 能更新内容与元数据。
+3. `delete` 能删除条目（开启确认时需弹确认）。
+4. `patch` 能执行内容操作与关键词操作。
+5. 非法或空指令载荷会被跳过且不导致崩溃。
 
-## Queue and Snapshot
+## 队列与快照
 
-1. Manual approval mode adds commands to queue.
-2. Approve single command and approve all.
-3. Reject single and reject all.
-4. Delete message rollback restores worldbook snapshot when enabled.
+1. 手动审核模式会把指令加入待审核队列。
+2. 支持单条批准与全部批准。
+3. 支持单条拒绝与全部拒绝。
+4. 开启删除同步时，删除消息后能正确回滚世界书快照。
 
-## Chat/Session Behavior
+## 聊天/会话行为
 
-1. Chat change resets transient runtime state.
-2. No repeated double-trigger on a single AI message.
-3. Managed mode uses or binds chat worldbook correctly.
+1. 聊天切换后会重置临时运行时状态。
+2. 单条 AI 消息不会被重复双触发处理。
+3. `managed` 模式能正确使用或绑定聊天世界书。
 
-## Stability
+## 稳定性
 
-1. `uid = 0` entries can update/delete/toggle normally.
-2. Unload path flushes logs and persists queue/snapshots.
-3. No runtime error when calling `window.WBM.openUI()` / `closeUI()`.
+1. `uid = 0` 的条目可正常更新/删除/切换启用状态。
+2. 卸载流程会刷新日志并持久化队列/快照。
+3. 调用 `window.WBM.openUI()` / `window.WBM.closeUI()` 不会触发运行时异常。

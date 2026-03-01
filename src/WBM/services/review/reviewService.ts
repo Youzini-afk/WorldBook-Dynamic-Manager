@@ -20,7 +20,7 @@ export class ReviewService {
   async review(messages: ChatMessage[]): Promise<WorldUpdateCommand[]> {
     const reply = await this.aiClient.call(messages);
     const commands = this.parser.parse(reply);
-    this.logger.info(`review completed: commands=${commands.length}`);
+    this.logger.info(`审核完成，解析指令数=${commands.length}`);
     return commands;
   }
 }

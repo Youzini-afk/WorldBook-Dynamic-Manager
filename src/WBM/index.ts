@@ -20,6 +20,7 @@ declare global {
 }
 
 export function bootstrapWbmV3(): void {
+  // 组合根：在这里装配配置、服务、仓储与 UI 控制器
   const logger = new Logger('WBM3');
   const config = loadConfig();
   const parser = new WorldUpdateParser(logger);
@@ -35,7 +36,7 @@ export function bootstrapWbmV3(): void {
   const panel = new PlaceholderPanelController(logger);
 
   repository.logBackend();
-  logger.info(`scheduler initialized: nextDue@0=${scheduler.nextDue(0)}`);
+  logger.info(`调度器已初始化: nextDue@0=${scheduler.nextDue(0)}`);
 
   window.WBM3 = {
     openUI: () => panel.open(),
@@ -43,7 +44,7 @@ export function bootstrapWbmV3(): void {
     manualReview: async (bookName, messages) => {
       const commands = await reviewService.review(messages);
       const results = await router.execute(commands, bookName);
-      logger.info('manual review executed', results);
+      logger.info('手动审核已执行', results);
     },
   };
 }

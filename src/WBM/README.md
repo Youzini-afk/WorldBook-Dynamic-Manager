@@ -1,17 +1,17 @@
-# WBM v3 Skeleton
+# WBM v3 骨架
 
-This folder is the v3 migration target with a modular layout aligned to Tavern Helper template conventions.
+该目录是 v3 迁移目标，采用与 Tavern Helper 模板风格一致的模块化结构。
 
-## Structure
+## 目录结构
 
-- `core/`: shared types and configuration.
-- `infra/`: logger and event subscription lifecycle.
-- `services/`: parser/patch/router/scheduler/review/worldbook.
-- `ui/`: panel controller abstractions.
-- `index.ts`: composition root (`bootstrapWbmV3`).
+- `core/`：共享类型与配置。
+- `infra/`：日志与事件订阅生命周期管理。
+- `services/`：parser/patch/router/scheduler/review/worldbook 服务层。
+- `ui/`：面板控制抽象。
+- `index.ts`：组合入口（`bootstrapWbmV3`）。
 
-## Migration Rule
+## 迁移规则
 
-1. New code is added here.
-2. Legacy behavior remains in `index.js` until v3 parity is completed.
-3. Once parity is confirmed, the legacy file can be replaced by the v3 bundle.
+1. 新功能和新实现优先放到本目录。
+2. 在 v3 功能等价完成前，`index.js` 仍保留旧逻辑。
+3. 等价验证通过后，再用 v3 构建产物替换旧入口。

@@ -10,14 +10,14 @@ export class PlaceholderPanelController implements PanelController {
   constructor(private readonly logger: LoggerLike) {}
 
   open(): void {
-    this.logger.info('panel.open() placeholder');
+    this.logger.info('panel.open() 占位实现');
   }
 
   close(): void {
-    this.logger.info('panel.close() placeholder');
+    this.logger.info('panel.close() 占位实现');
   }
 
   refresh(): void {
-    this.logger.info('panel.refresh() placeholder');
+    this.logger.info('panel.refresh() 占位实现');
   }
 }

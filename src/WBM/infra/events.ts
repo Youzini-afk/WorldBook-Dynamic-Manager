@@ -17,7 +17,7 @@ export class EventSubscriptions {
 
   on(event: string, listener: (...args: unknown[]) => void): void {
     if (!this.source) {
-      this.logger.warn(`event source unavailable: ${event}`);
+      this.logger.warn(`事件源不可用: ${event}`);
       return;
     }
     this.source.on(event, listener);
@@ -25,7 +25,7 @@ export class EventSubscriptions {
       try {
         this.source?.off?.(event, listener);
       } catch (error) {
-        this.logger.warn(`failed to unbind event: ${event}`, error);
+        this.logger.warn(`解绑事件失败: ${event}`, error);
       }
     });
   }

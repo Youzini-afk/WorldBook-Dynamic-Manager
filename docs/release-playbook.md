@@ -1,34 +1,34 @@
-# Release Playbook
+# 发布手册
 
-## v2.1 (Stabilization Patch)
+## v2.1（稳定性补丁）
 
-Scope:
+范围：
 
-1. Critical bug fixes only.
-2. No architectural migration.
-3. Keep runtime behavior stable.
+1. 只修关键缺陷。
+2. 不做架构迁移。
+3. 保持运行时行为稳定。
 
-Gate:
+准入条件：
 
-1. All checklist items in `docs/regression-checklist.md` pass.
-2. No syntax/runtime regression in `index.js`.
+1. `docs/regression-checklist.md` 全部通过。
+2. `index.js` 无语法/运行时回归。
 
-## v3.0 (Deep Alignment)
+## v3.0（深度标准化对齐）
 
-Scope:
+范围：
 
-1. Modular TypeScript architecture under `src/WBM`.
-2. Official worldbook API-first repository layer.
-3. Lifecycle/event cleanup and testable services.
+1. 在 `src/WBM` 下落地模块化 TypeScript 架构。
+2. 世界书仓储层以官方高层 API 为优先。
+3. 完成生命周期/事件清理与可测试服务化。
 
-Gate:
+准入条件：
 
-1. Unit/integration tests from `docs/test-matrix.md` pass.
-2. Feature parity validated against `docs/phase0-baseline.md`.
-3. Release notes list intentional behavior changes.
+1. `docs/test-matrix.md` 中单元/集成测试全部通过。
+2. 与 `docs/phase0-baseline.md` 对照功能等价。
+3. 发布说明明确记录所有有意行为变更。
 
-## Rollback
+## 回滚策略
 
-1. Keep separate release tags for `v2.1` and `v3.0`.
-2. If `v3.0` blocks production use, roll back to `v2.1`.
-3. Do not overwrite artifacts between release lines.
+1. `v2.1` 与 `v3.0` 保留独立发布标签。
+2. 若 `v3.0` 出现阻断，可快速回切 `v2.1`。
+3. 不允许两个发布线互相覆盖产物。

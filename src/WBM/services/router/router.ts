@@ -36,7 +36,7 @@ export class CommandRouter {
         const result = await this.executeOne(command, bookName);
         results.push(result);
       } catch (error) {
-        this.logger.error('command execute failed', { command, error });
+        this.logger.error('指令执行失败', { command, error });
         results.push({
           action: command.action,
           entry_name: command.entry_name,
@@ -54,7 +54,7 @@ export class CommandRouter {
 
     if (command.action === 'create') {
       await this.repository.addEntry(bookName, { name: command.entry_name, ...command.fields });
-      return { action: 'create', entry_name: command.entry_name, status: 'ok', detail: 'created' };
+      return { action: 'create', entry_name: command.entry_name, status: 'ok', detail: '已创建' };
     }
 
     if (!target) {
@@ -62,20 +62,20 @@ export class CommandRouter {
         action: command.action,
         entry_name: command.entry_name,
         status: 'skipped',
-        reason: 'target not found',
+        reason: '未找到目标条目',
       };
     }
 
     if (command.action === 'update') {
       await this.repository.updateEntry(bookName, { ...target, ...command.fields });
-      return { action: 'update', entry_name: command.entry_name, status: 'ok', detail: 'updated' };
+      return { action: 'update', entry_name: command.entry_name, status: 'ok', detail: '已更新' };
     }
 
     if (command.action === 'delete') {
       const uid = resolveUid(target);
-      if (uid == null) return { action: 'delete', entry_name: command.entry_name, status: 'error', reason: 'missing uid' };
+      if (uid == null) return { action: 'delete', entry_name: command.entry_name, status: 'error', reason: '缺少 uid' };
       await this.repository.deleteEntry(bookName, uid);
-      return { action: 'delete', entry_name: command.entry_name, status: 'ok', detail: 'deleted' };
+      return { action: 'delete', entry_name: command.entry_name, status: 'ok', detail: '已删除' };
     }
 
     const next = { ...target, ...command.fields };
@@ -85,7 +85,7 @@ export class CommandRouter {
       action: 'patch',
       entry_name: command.entry_name,
       status: 'ok',
-      detail: `patch applied:${patchResult.applied} skipped:${patchResult.skipped}`,
+      detail: `patch 生效:${patchResult.applied} 跳过:${patchResult.skipped}`,
     };
   }
 }

@@ -29,13 +29,14 @@ export class TavernWorldbookRepository implements WorldbookRepository {
   constructor(private readonly logger: LoggerLike) {}
 
   async getEntries(bookName: string): Promise<WorldbookEntryLike[]> {
+    // 优先走官方高层 API，失败时再回退 TavernHelper 兼容层
     if (typeof getWorldbook === 'function') {
       return await getWorldbook(bookName);
     }
     if (TavernHelper?.getLorebookEntries) {
       return await TavernHelper.getLorebookEntries(bookName);
     }
-    throw new Error('worldbook read API unavailable');
+    throw new Error('世界书读取 API 不可用');
   }
 
   async addEntry(bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void> {
@@ -47,14 +48,15 @@ export class TavernWorldbookRepository implements WorldbookRepository {
       await TavernHelper.createLorebookEntries(bookName, [fields]);
       return;
     }
-    throw new Error('worldbook create API unavailable');
+    throw new Error('世界书创建 API 不可用');
   }
 
   async updateEntry(bookName: string, entry: WorldbookEntryLike): Promise<void> {
     const uid = entry.uid ?? entry.id;
-    if (uid == null) throw new Error('missing uid');
+    if (uid == null) throw new Error('缺少 uid');
 
     if (typeof updateWorldbookWith === 'function') {
+      // 高层 API 场景下用 updater 按 uid 精准更新条目
       await updateWorldbookWith(bookName, entries =>
         entries.map(item => {
           const itemUid = item.uid ?? item.id;
@@ -68,7 +70,7 @@ export class TavernWorldbookRepository implements WorldbookRepository {
       await TavernHelper.setLorebookEntries(bookName, [entry]);
       return;
     }
-    throw new Error('worldbook update API unavailable');
+    throw new Error('世界书更新 API 不可用');
   }
 
   async deleteEntry(bookName: string, uid: number | string): Promise<void> {
@@ -83,18 +85,18 @@ export class TavernWorldbookRepository implements WorldbookRepository {
       await TavernHelper.deleteLorebookEntry(bookName, uid);
       return;
     }
-    throw new Error('worldbook delete API unavailable');
+    throw new Error('世界书删除 API 不可用');
   }
 
   logBackend(): void {
     if (typeof getWorldbook === 'function') {
-      this.logger.info('worldbook backend: official high-level API');
+      this.logger.info('世界书后端：官方高层 API');
       return;
     }
     if (TavernHelper?.getLorebookEntries) {
-      this.logger.info('worldbook backend: TavernHelper compatibility layer');
+      this.logger.info('世界书后端：TavernHelper 兼容层');
       return;
     }
-    this.logger.warn('worldbook backend: unavailable');
+    this.logger.warn('世界书后端：不可用');
   }
 }

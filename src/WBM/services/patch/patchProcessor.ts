@@ -23,7 +23,7 @@ export class PatchProcessor {
         else result.skipped++;
       } catch (error) {
         result.skipped++;
-        result.errors.push(`${opName || 'unknown'} failed: ${String(error)}`);
+        result.errors.push(`${opName || '未知操作'} 执行失败: ${String(error)}`);
       }
     }
     return result;

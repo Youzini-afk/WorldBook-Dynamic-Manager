@@ -16,6 +16,7 @@ export class WorldUpdateParser {
   constructor(private readonly logger: LoggerLike) {}
 
   parse(text: string): WorldUpdateCommand[] {
+    // 只解析包裹在 <world_update> 标签内的指令载荷
     if (!text) return [];
     const match = text.match(WORLD_UPDATE_RE);
     if (!match) return [];
@@ -28,7 +29,7 @@ export class WorldUpdateParser {
       const action = String(raw.action ?? '').toLowerCase() as WorldAction;
       const entryName = String(raw.entry_name ?? '').trim();
       if (!ACTIONS.includes(action) || !entryName) {
-        this.logger.warn('skip invalid command payload', raw);
+        this.logger.warn('跳过非法指令载荷', raw);
         continue;
       }
       commands.push({
@@ -42,6 +43,7 @@ export class WorldUpdateParser {
   }
 
   stripWorldUpdate(text: string): string {
+    // 用于在内联模式下剥离指令块，避免显示给用户
     return text.replace(WORLD_UPDATE_RE, '').trim();
   }
 }
