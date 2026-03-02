@@ -21,15 +21,19 @@ export class EventSubscriptions {
 
   on(event: string, listener: (...args: unknown[]) => void): void {
     if (typeof eventOn === 'function') {
-      const binding = eventOn(event, listener);
-      this.stops.push(() => {
-        try {
-          binding.stop();
-        } catch (error) {
-          this.logger.warn(`eventOn stop 失败: ${event}`, error);
-        }
-      });
-      return;
+      try {
+        const binding = eventOn(event, listener);
+        this.stops.push(() => {
+          try {
+            binding.stop();
+          } catch (error) {
+            this.logger.warn(`eventOn stop 失败: ${event}`, error);
+          }
+        });
+        return;
+      } catch (error) {
+        this.logger.warn(`eventOn 注册失败，尝试降级 source.on: ${event}`, error);
+      }
     }
 
     if (!this.source) {

@@ -114,8 +114,9 @@ export function bootstrapWbmV3(): void {
     activeDisposer = null;
   }
 
-  const logger = new Logger('WBM3');
   const config = loadConfig();
+  const logger = new Logger('WBM3', config.logLevel);
+  logger.setLevel(config.logLevel);
   const parser = new WorldUpdateParser(logger);
   const patchProcessor = new PatchProcessor();
   const repository = new TavernWorldbookRepository(logger);
@@ -157,8 +158,8 @@ export function bootstrapWbmV3(): void {
     approvalMode: config.approvalMode,
     queueSize: queue.size(),
     nextDueFloor: scheduler.getState().nextDueFloor,
-      targetBookName,
-    });
+    targetBookName,
+  });
 
   const collectMessages = (): ChatMessage[] => collectRecentChatMessages(config.reviewDepth);
 
@@ -178,7 +179,16 @@ export function bootstrapWbmV3(): void {
     processing = true;
     panel.refresh();
     try {
-      const commands = await reviewService.review(messages);
+      const worldbookEntries = await repository.getEntries(bookName).catch(error => {
+        logger.warn(`读取世界书失败，使用空上下文: ${bookName}`, error);
+        return [];
+      });
+      const commands = await reviewService.review(messages, {
+        bookName,
+        source,
+        reviewDepth: config.reviewDepth,
+        worldbookEntries,
+      });
       const results = await router.execute(commands, bookName, {
         approvalMode: config.approvalMode,
         source,
