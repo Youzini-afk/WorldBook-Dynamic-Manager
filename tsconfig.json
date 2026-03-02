@@ -2,13 +2,36 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "ESNext",
+    "lib": [
+      "ES2020",
+      "DOM"
+    ],
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@util/*": [
+        "./src/WBM/util/*"
+      ]
+    },
     "strict": true,
     "allowJs": false,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "forceConsistentCasingInFileNames": true
   },
   "include": [
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
   ]
 }

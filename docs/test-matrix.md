@@ -1,5 +1,19 @@
 # 测试矩阵
 
+## 自动化入口
+
+1. `npm run typecheck`
+2. `npm run lint`
+3. `npm run test`
+4. `npm run build`
+
+当前覆盖率门槛：
+
+1. lines >= 90
+2. statements >= 90
+3. branches >= 70
+4. functions >= 85
+
 ## 单元测试（v3）
 
 ### Parser
@@ -36,6 +50,7 @@
 3. 消息删除后的快照回滚一致性。
 4. 聊天切换后的状态重置与事件重绑。
 5. 外部 API 与主 API 审核链路。
+6. 高楼层并发触发时只执行一次（回放测试）。
 
 ## 手工探索测试
 

@@ -6,10 +6,31 @@ export interface PatchResult {
   errors: string[];
 }
 
+const SET_FIELD_ALLOW_LIST = new Set([
+  'content',
+  'enabled',
+  'comment',
+  'name',
+  'constant',
+  'selective',
+  'depth',
+  'order',
+  'keys',
+  'secondary_keys',
+  'probability',
+  'sticky',
+  'cooldown',
+  'delay',
+]);
+
 function splitKeys(input: unknown): string[] {
   if (Array.isArray(input)) return input.map(String).map(v => v.trim()).filter(Boolean);
   if (typeof input === 'string') return input.split(',').map(v => v.trim()).filter(Boolean);
   return [];
+}
+
+function uniq(items: string[]): string[] {
+  return Array.from(new Set(items));
 }
 
 export class PatchProcessor {
@@ -31,22 +52,48 @@ export class PatchProcessor {
 
   private applyOne(entry: WorldbookEntryLike, opName: string, op: PatchOp): boolean {
     const current = String(entry.content ?? '');
+    if (!opName) return false;
     if (opName === 'append') {
       const value = String(op.value ?? '');
       if (!value) return false;
+      if (current.includes(value)) return false;
       entry.content = current + value;
       return true;
     }
     if (opName === 'prepend') {
       const value = String(op.value ?? '');
       if (!value) return false;
+      if (current.startsWith(value)) return false;
       entry.content = value + current;
+      return true;
+    }
+    if (opName === 'insert_after') {
+      const anchor = String(op.anchor ?? '');
+      const value = String(op.value ?? '');
+      if (!anchor || !value) return false;
+      const index = current.indexOf(anchor);
+      if (index < 0) return false;
+      const injected = `${anchor}${value}`;
+      if (current.includes(injected)) return false;
+      entry.content = current.slice(0, index) + injected + current.slice(index + anchor.length);
+      return true;
+    }
+    if (opName === 'insert_before') {
+      const anchor = String(op.anchor ?? '');
+      const value = String(op.value ?? '');
+      if (!anchor || !value) return false;
+      const index = current.indexOf(anchor);
+      if (index < 0) return false;
+      const injected = `${value}${anchor}`;
+      if (current.includes(injected)) return false;
+      entry.content = current.slice(0, index) + injected + current.slice(index + anchor.length);
       return true;
     }
     if (opName === 'replace_text') {
       const find = String(op.find ?? '');
       const value = String(op.value ?? '');
       if (!find || !current.includes(find)) return false;
+      if (find === value) return false;
       entry.content = current.split(find).join(value);
       return true;
     }
@@ -59,13 +106,16 @@ export class PatchProcessor {
     if (opName === 'set_field') {
       const field = String(op.field ?? '').trim();
       if (!field) return false;
+      if (!SET_FIELD_ALLOW_LIST.has(field)) {
+        throw new Error(`字段不在白名单内: ${field}`);
+      }
       entry[field] = op.value;
       return true;
     }
     if (opName === 'add_key') {
       const value = String(op.value ?? '').trim();
       if (!value) return false;
-      const keys = splitKeys(entry.keys);
+      const keys = uniq(splitKeys(entry.keys));
       if (keys.includes(value)) return false;
       keys.push(value);
       entry.keys = keys.join(',');
@@ -83,7 +133,7 @@ export class PatchProcessor {
     if (opName === 'add_secondary_key') {
       const value = String(op.value ?? '').trim();
       if (!value) return false;
-      const keys = splitKeys(entry.secondary_keys);
+      const keys = uniq(splitKeys(entry.secondary_keys));
       if (keys.includes(value)) return false;
       keys.push(value);
       entry.secondary_keys = keys.join(',');

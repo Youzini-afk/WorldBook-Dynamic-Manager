@@ -1,6 +1,6 @@
-# WBM v3 骨架
+# WBM v3 模块
 
-该目录是 v3 迁移目标，采用与 Tavern Helper 模板风格一致的模块化结构。
+该目录为 v3 主实现目录，已接入工程化构建、自动化测试与兼容壳 API。
 
 ## 目录结构
 
@@ -10,7 +10,35 @@
 - `ui/`：面板控制抽象。
 - `index.ts`：组合入口（`bootstrapWbmV3`）。
 
-## 迁移规则
+## 构建与校验
+
+在仓库根目录执行：
+
+1. `npm run typecheck`
+2. `npm run lint`
+3. `npm run test`
+4. `npm run build`
+
+## 对外 API
+
+`bootstrapWbmV3()` 会挂载：
+
+- `window.WBM3.openUI()`
+- `window.WBM3.closeUI()`
+- `window.WBM3.manualReview(bookName, messages)`
+- `window.WBM3.approveQueue(ids?)`
+- `window.WBM3.rejectQueue(ids?)`
+- `window.WBM3.rollback(snapshotId)`
+- `window.WBM3.getStatus()`
+
+兼容壳：
+
+- `window.WBM`
+- `window.WorldBookManager`
+
+首次调用会输出弃用告警，提示迁移到 `window.WBM3`。
+
+## 迁移约束
 
 1. 新功能和新实现优先放到本目录。
 2. 在 v3 功能等价完成前，`index.js` 仍保留旧逻辑。

@@ -1,5 +1,5 @@
 import type { LoggerLike, WorldUpdateCommand } from '../../core/types';
-import { WorldUpdateParser } from '../parser/worldUpdateParser';
+import type { WorldUpdateParser } from '../parser/worldUpdateParser';
 
 // 发送给模型的聊天消息结构
 export interface ChatMessage {

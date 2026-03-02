@@ -26,6 +26,13 @@
 1. `docs/test-matrix.md` 中单元/集成测试全部通过。
 2. 与 `docs/phase0-baseline.md` 对照功能等价。
 3. 发布说明明确记录所有有意行为变更。
+4. CI（`lint + typecheck + test + build`）全绿。
+
+建议发布步骤：
+
+1. 本地执行 `npm run lint && npm run typecheck && npm run test && npm run build`。
+2. 先打 `v3.0.0-rc.1`，完成手工回归后再发 `rc.2`。
+3. `rc` 全部通过后再发正式版 `v3.0.0`。
 
 ## 回滚策略
 
