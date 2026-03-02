@@ -18,6 +18,13 @@
 2. `npm run lint`
 3. `npm run test`
 4. `npm run build`
+5. 发布单文件时执行 `npm run build:release`
+
+构建产物：
+
+1. `dist/wbm3.js`：模块化主产物（供多文件接入）。
+2. `dist/index.js`：单文件自启动产物。
+3. `index.js`：执行 `build:release` 后同步为当前单文件发布包。
 
 ## 对外 API
 
@@ -29,6 +36,9 @@
 - `window.WBM3.approveQueue(ids?)`
 - `window.WBM3.rejectQueue(ids?)`
 - `window.WBM3.rollback(snapshotId)`
+- `window.WBM3.rollbackFloor(floor, chatId?)`
+- `window.WBM3.listQueue()`
+- `window.WBM3.listSnapshots(bookName?)`
 - `window.WBM3.getStatus()`
 
 说明：
@@ -41,10 +51,15 @@
 - `window.WBM`
 - `window.WorldBookManager`
 
-首次调用会输出弃用告警，提示迁移到 `window.WBM3`。
+首次调用会输出弃用告警，提示迁移到 `window.WBM3`。兼容壳保留映射：
+
+- `approveAll/approveOne`
+- `rejectAll/rejectOne`
+- `rollbackFloor`
+- `getPendingQueue/getSnapshots`
 
 ## 迁移约束
 
 1. 新功能和新实现优先放到本目录。
-2. 在 v3 功能等价完成前，`index.js` 仍保留旧逻辑。
-3. 等价验证通过后，再用 v3 构建产物替换旧入口。
+2. 根目录 `index.js` 由 `npm run build:release` 自动同步，不手工维护业务逻辑。
+3. 兼容壳（`window.WBM`/`window.WorldBookManager`）仅用于过渡，不再扩展新能力。

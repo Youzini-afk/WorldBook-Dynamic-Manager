@@ -51,4 +51,14 @@ export class SnapshotStore {
     const found = this.snapshots.find(snapshot => snapshot.id === id);
     return found ? clone(found) : null;
   }
+
+  findLatestByFloor(floor: number, chatId?: string): SnapshotRecord | null {
+    for (let i = this.snapshots.length - 1; i >= 0; i--) {
+      const snapshot = this.snapshots[i];
+      if (snapshot.floor !== floor) continue;
+      if (chatId && snapshot.chatId !== chatId) continue;
+      return clone(snapshot);
+    }
+    return null;
+  }
 }

@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
+import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
+  plugins: [vue()],
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
@@ -17,8 +19,8 @@ export default defineConfig({
       ],
       thresholds: {
         lines: 90,
-        functions: 85,
-        branches: 70,
+        functions: 90,
+        branches: 80,
         statements: 90,
       },
     },

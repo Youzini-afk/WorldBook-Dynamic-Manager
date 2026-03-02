@@ -40,6 +40,8 @@ export interface SnapshotStore {
 export interface RouterExecutionOptions {
   approvalMode?: ApprovalMode;
   source?: PendingReviewItem['source'];
+  floor?: number;
+  chatId?: string;
 }
 
 export class CommandRouter {
@@ -58,8 +60,10 @@ export class CommandRouter {
   ): Promise<RouterResult[]> {
     const approvalMode = options.approvalMode ?? 'auto';
     const source = options.source ?? 'manual';
+    const floor = options.floor;
+    const chatId = options.chatId;
     if (approvalMode === 'manual') {
-      const queued = this.enqueueCommands(commands, bookName, source);
+      const queued = this.enqueueCommands(commands, bookName, source, floor, chatId);
       return commands.map(command => ({
         action: 'queue',
         entry_name: command.entry_name,
@@ -71,7 +75,7 @@ export class CommandRouter {
     const results: RouterResult[] = [];
     for (const command of commands) {
       if (approvalMode === 'selective' && command.action === 'delete') {
-        const queued = this.enqueueCommands([command], bookName, source);
+        const queued = this.enqueueCommands([command], bookName, source, floor, chatId);
         results.push({
           action: 'queue',
           entry_name: command.entry_name,
@@ -82,7 +86,7 @@ export class CommandRouter {
       }
 
       try {
-        const result = await this.executeOne(command, bookName);
+        const result = await this.executeOne(command, bookName, floor, chatId);
         results.push(result);
       } catch (error) {
         this.logger.error('指令执行失败', { command, error });
@@ -101,6 +105,8 @@ export class CommandRouter {
     commands: WorldUpdateCommand[],
     bookName: string,
     source: PendingReviewItem['source'],
+    floor?: number,
+    chatId?: string,
   ): PendingReviewItem {
     const item: PendingReviewItem = {
       id: makeId('queue'),
@@ -108,12 +114,19 @@ export class CommandRouter {
       commands,
       createdAt: new Date().toISOString(),
       source,
+      floor,
+      chatId,
     };
     this.queueStore?.enqueue(item);
     return item;
   }
 
-  private async saveSnapshot(bookName: string, reason: string): Promise<void> {
+  private async saveSnapshot(
+    bookName: string,
+    reason: string,
+    floor?: number,
+    chatId?: string,
+  ): Promise<void> {
     if (!this.snapshotStore) return;
     const entries = await this.repository.getEntries(bookName);
     this.snapshotStore.save({
@@ -122,10 +135,17 @@ export class CommandRouter {
       createdAt: new Date().toISOString(),
       reason,
       entries,
+      floor,
+      chatId,
     });
   }
 
-  private async executeOne(command: WorldUpdateCommand, bookName: string): Promise<RouterResult> {
+  private async executeOne(
+    command: WorldUpdateCommand,
+    bookName: string,
+    floor?: number,
+    chatId?: string,
+  ): Promise<RouterResult> {
     const entries = await this.repository.getEntries(bookName);
     const target = findByName(entries, command.entry_name);
 
@@ -144,7 +164,7 @@ export class CommandRouter {
     }
 
     if (command.action === 'update') {
-      await this.saveSnapshot(bookName, `update:${command.entry_name}`);
+      await this.saveSnapshot(bookName, `update:${command.entry_name}`, floor, chatId);
       await this.repository.updateEntry(bookName, { ...target, ...command.fields });
       return { action: 'update', entry_name: command.entry_name, status: 'ok', detail: '已更新' };
     }
@@ -160,14 +180,14 @@ export class CommandRouter {
           reason: '缺少 uid',
         };
       }
-      await this.saveSnapshot(bookName, `delete:${command.entry_name}`);
+      await this.saveSnapshot(bookName, `delete:${command.entry_name}`, floor, chatId);
       await this.repository.deleteEntry(bookName, uid);
       return { action: 'delete', entry_name: command.entry_name, status: 'ok', detail: '已删除' };
     }
 
     const next = { ...target, ...command.fields };
     const patchResult = this.patchProcessor.apply(next, command.ops);
-    await this.saveSnapshot(bookName, `patch:${command.entry_name}`);
+    await this.saveSnapshot(bookName, `patch:${command.entry_name}`, floor, chatId);
     await this.repository.updateEntry(bookName, next);
     return {
       action: 'patch',

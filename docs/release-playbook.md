@@ -1,5 +1,12 @@
 # 发布手册
 
+配套文档：
+
+1. `docs/changes-from-original.md`
+2. `docs/development-guide.md`
+3. `docs/test-matrix.md`
+4. `docs/regression-checklist.md`
+
 ## v2.1（稳定性补丁）
 
 范围：
@@ -24,15 +31,16 @@
 准入条件：
 
 1. `docs/test-matrix.md` 中单元/集成测试全部通过。
-2. 与 `docs/phase0-baseline.md` 对照功能等价。
+2. 与当前 `README` 及 `docs/changes-from-original.md` 中声明的能力保持一致。
 3. 发布说明明确记录所有有意行为变更。
 4. CI（`lint + typecheck + test + build`）全绿。
 
 建议发布步骤：
 
-1. 本地执行 `npm run lint && npm run typecheck && npm run test && npm run build`。
-2. 先打 `v3.0.0-rc.1`，完成手工回归后再发 `rc.2`。
-3. `rc` 全部通过后再发正式版 `v3.0.0`。
+1. 本地执行 `npm run lint && npm run typecheck && npm run test && npm run build:release`。
+2. 校验双轨产物：`dist/wbm3.js` 与根目录 `index.js`（由 `dist/index.js` 同步）。
+3. 先打 `v3.0.0-rc.1`，完成手工回归后再发 `rc.2`。
+4. `rc` 全部通过后再发正式版 `v3.0.0`。
 
 ## 回滚策略
 

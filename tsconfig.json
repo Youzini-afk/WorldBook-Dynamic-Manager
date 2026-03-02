@@ -31,6 +31,8 @@
   },
   "include": [
     "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.vue",
     "tests/**/*.ts",
     "vitest.config.ts"
   ]

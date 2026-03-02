@@ -63,4 +63,38 @@ describe('PatchProcessor', () => {
     expect(result.applied).toBe(0);
     expect(result.skipped).toBe(1);
   });
+
+  it('参数缺失/重复注入/无变化操作应跳过', () => {
+    const entry: WorldbookEntryLike = { content: 'A[anchor]B', keys: ['x'], secondary_keys: ['y'] };
+    const result = processor.apply(entry, [
+      { op: '' },
+      { op: 'append', value: '' },
+      { op: 'append', value: 'A' },
+      { op: 'prepend', value: '' },
+      { op: 'prepend', value: 'A' },
+      { op: 'insert_after', anchor: '', value: 'x' },
+      { op: 'insert_after', anchor: 'missing', value: 'x' },
+      { op: 'insert_after', anchor: '[anchor]', value: 'B' },
+      { op: 'insert_before', anchor: '', value: 'x' },
+      { op: 'insert_before', anchor: 'missing', value: 'x' },
+      { op: 'insert_before', anchor: '[anchor]', value: 'A' },
+      { op: 'replace_text', find: '', value: 'x' },
+      { op: 'replace_text', find: 'missing', value: 'x' },
+      { op: 'replace_text', find: 'A', value: 'A' },
+      { op: 'remove_text', find: '' },
+      { op: 'remove_text', find: 'missing' },
+      { op: 'set_field', field: '   ', value: 1 },
+      { op: 'add_key', value: ' ' },
+      { op: 'add_key', value: 'x' },
+      { op: 'remove_key', value: ' ' },
+      { op: 'remove_key', value: 'missing' },
+      { op: 'add_secondary_key', value: ' ' },
+      { op: 'add_secondary_key', value: 'y' },
+      { op: 'remove_secondary_key', value: ' ' },
+      { op: 'remove_secondary_key', value: 'missing' },
+    ]);
+    expect(result.applied).toBe(0);
+    expect(result.skipped).toBe(25);
+    expect(result.errors).toHaveLength(0);
+  });
 });

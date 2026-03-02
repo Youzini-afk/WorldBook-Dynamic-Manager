@@ -84,10 +84,12 @@ describe('CommandRouter', () => {
     const results = await router.execute(
       [{ action: 'create', entry_name: '条目A', fields: {}, ops: [] }],
       'bookA',
-      { approvalMode: 'manual' },
+      { approvalMode: 'manual', floor: 22, chatId: 'chat-1' },
     );
     expect(results[0].status).toBe('queued');
     expect(queue).toHaveLength(1);
+    expect(queue[0].floor).toBe(22);
+    expect(queue[0].chatId).toBe('chat-1');
   });
 
   it('selective 模式仅 delete 入队', async () => {
@@ -142,9 +144,11 @@ describe('CommandRouter', () => {
         { action: 'delete', entry_name: '条目A', fields: {}, ops: [] },
       ],
       'bookA',
-      { approvalMode: 'auto' },
+      { approvalMode: 'auto', floor: 9, chatId: 'chat-a' },
     );
     expect(snapshots).toHaveLength(3);
+    expect(snapshots.every(item => item.floor === 9)).toBe(true);
+    expect(snapshots.every(item => item.chatId === 'chat-a')).toBe(true);
   });
 
   it('目标不存在时返回 skipped，缺少 uid 时返回 error', async () => {

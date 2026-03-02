@@ -25,4 +25,20 @@ describe('Logger', () => {
     logger.info('yes');
     expect(logSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('支持 sink 收集日志记录', () => {
+    const records: Array<{ level: string; message: string }> = [];
+    const logger = new Logger('WBM3', 'warn', record => {
+      records.push({ level: record.level, message: record.message });
+    });
+
+    logger.info('ignore');
+    logger.warn('warn');
+    logger.error('error');
+
+    expect(records).toEqual([
+      { level: 'warn', message: 'warn' },
+      { level: 'error', message: 'error' },
+    ]);
+  });
 });

@@ -84,6 +84,8 @@ export interface PendingReviewItem {
   commands: WorldUpdateCommand[];
   createdAt: string;
   source: 'manual' | 'auto';
+  floor?: number;
+  chatId?: string;
 }
 
 export interface SnapshotRecord {
@@ -92,6 +94,8 @@ export interface SnapshotRecord {
   createdAt: string;
   reason: string;
   entries: WorldbookEntryLike[];
+  floor?: number;
+  chatId?: string;
 }
 
 export interface WbmStatus {
@@ -107,4 +111,20 @@ export interface LoggerLike {
   info(message: string, extra?: unknown): void;
   warn(message: string, extra?: unknown): void;
   error(message: string, extra?: unknown): void;
+}
+
+export interface WbmPublicApi {
+  openUI(): void;
+  closeUI(): void;
+  manualReview(
+    bookName?: string,
+    messages?: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  ): Promise<void>;
+  approveQueue(ids?: string[]): Promise<void>;
+  rejectQueue(ids?: string[]): Promise<number>;
+  rollback(snapshotId: string): Promise<void>;
+  rollbackFloor(floor: number, chatId?: string): Promise<void>;
+  listQueue(): PendingReviewItem[];
+  listSnapshots(bookName?: string): SnapshotRecord[];
+  getStatus(): WbmStatus;
 }

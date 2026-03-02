@@ -23,4 +23,39 @@ describe('SnapshotStore', () => {
     expect(store.list('bookA')).toHaveLength(1);
     expect(store.findById('s2')?.bookName).toBe('bookB');
   });
+
+  it('支持按 floor/chatId 查找最新快照', () => {
+    const store = new SnapshotStore(memoryStorage());
+    store.save({
+      id: 's1',
+      bookName: 'bookA',
+      createdAt: new Date().toISOString(),
+      reason: 'update:A',
+      entries: [{ uid: 1, name: 'A' }],
+      floor: 12,
+      chatId: 'chat-a',
+    });
+    store.save({
+      id: 's2',
+      bookName: 'bookA',
+      createdAt: new Date().toISOString(),
+      reason: 'patch:A',
+      entries: [{ uid: 1, name: 'A2' }],
+      floor: 12,
+      chatId: 'chat-b',
+    });
+    store.save({
+      id: 's3',
+      bookName: 'bookA',
+      createdAt: new Date().toISOString(),
+      reason: 'patch:A3',
+      entries: [{ uid: 1, name: 'A3' }],
+      floor: 12,
+    });
+
+    expect(store.findLatestByFloor(12)?.id).toBe('s3');
+    expect(store.findLatestByFloor(12, 'chat-a')?.id).toBe('s1');
+    expect(store.findLatestByFloor(12, 'missing')).toBeNull();
+    expect(store.findLatestByFloor(12, 'chat-b')?.id).toBe('s2');
+  });
 });
