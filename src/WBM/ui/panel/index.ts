@@ -18,6 +18,7 @@ export class VuePanelController implements PanelController {
   constructor(
     private readonly logger: LoggerLike,
     private readonly bridge: PanelBridge,
+    private readonly onVisibilityChange?: (open: boolean) => void,
   ) {}
 
   private ensureMounted(): boolean {
@@ -52,6 +53,7 @@ export class VuePanelController implements PanelController {
     if (!this.ensureMounted() || !this.overlay) return;
     this.opened = true;
     this.overlay.style.display = 'flex';
+    this.onVisibilityChange?.(true);
     this.logger.info('Vue 面板已打开');
   }
 
@@ -59,6 +61,7 @@ export class VuePanelController implements PanelController {
     if (!this.overlay) return;
     this.opened = false;
     this.overlay.style.display = 'none';
+    this.onVisibilityChange?.(false);
     this.logger.info('Vue 面板已关闭');
   }
 
@@ -73,6 +76,7 @@ export class VuePanelController implements PanelController {
     this.overlay?.remove();
     this.overlay = null;
     this.opened = false;
+    this.onVisibilityChange?.(false);
   }
 }
 

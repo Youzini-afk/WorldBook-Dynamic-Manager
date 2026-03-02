@@ -14,6 +14,7 @@ import { type ChatMessage, ReviewService } from './services/review/reviewService
 import { TavernWorldbookRepository } from './services/worldbook/repository';
 import { SnapshotStore } from './services/worldbook/snapshotStore';
 import { TargetBookResolver } from './services/worldbook/targetResolver';
+import { MagicWandLauncher } from './ui/launcher';
 import { VuePanelController } from './ui/panel';
 import type { PanelBridge } from './ui/panel';
 
@@ -189,6 +190,7 @@ export function bootstrapWbmV3(): void {
   let lastObservedFloor = 0;
   let activeChatId = '';
   let panel: VuePanelController;
+  let launcher: MagicWandLauncher | null = null;
   let api: WbmPublicApi;
 
   const rebuildScheduler = (currentFloor: number): void => {
@@ -337,7 +339,29 @@ export function bootstrapWbmV3(): void {
     },
   };
 
-  panel = new VuePanelController(logger, panelBridge);
+  panel = new VuePanelController(logger, panelBridge, open => {
+    launcher?.setActive(open);
+  });
+
+  const openPanel = (): void => {
+    panel.open();
+  };
+
+  const closePanel = (): void => {
+    panel.close();
+  };
+
+  launcher = new MagicWandLauncher(logger, {
+    label: '动态世界书',
+    onToggle: open => {
+      if (open) {
+        openPanel();
+        return;
+      }
+      closePanel();
+    },
+  });
+  launcher.init();
 
   repository.logBackend();
   logger.info(
@@ -345,8 +369,8 @@ export function bootstrapWbmV3(): void {
   );
 
   api = {
-    openUI: () => panel.open(),
-    closeUI: () => panel.close(),
+    openUI: () => openPanel(),
+    closeUI: () => closePanel(),
     manualReview: async (bookName, messages) => {
       const target = await resolveBookName(bookName);
       const reviewMessages = messages && messages.length > 0 ? messages : collectMessages();
@@ -431,6 +455,8 @@ export function bootstrapWbmV3(): void {
   activeDisposer = () => {
     events.clear();
     panel.destroy();
+    launcher?.destroy();
+    launcher = null;
     if (typeof window !== 'undefined') {
       delete window.WBM3;
       delete window.WBM;
@@ -438,7 +464,7 @@ export function bootstrapWbmV3(): void {
     }
   };
 
-  logger.info('WBM3 已就绪，兼容壳 WBM/WorldBookManager 已挂载');
+  logger.info('动态世界书 v3 已就绪，兼容壳 WBM/WorldBookManager 已挂载');
 }
 
 export function unloadWbmV3(): void {
@@ -452,4 +478,3 @@ export function unloadWbmV3(): void {
   delete window.WBM;
   delete window.WorldBookManager;
 }
-
