@@ -25,11 +25,16 @@
 
 - `window.WBM3.openUI()`
 - `window.WBM3.closeUI()`
-- `window.WBM3.manualReview(bookName, messages)`
+- `window.WBM3.manualReview(bookName?, messages?)`
 - `window.WBM3.approveQueue(ids?)`
 - `window.WBM3.rejectQueue(ids?)`
 - `window.WBM3.rollback(snapshotId)`
 - `window.WBM3.getStatus()`
+
+说明：
+
+1. `manualReview` 不传 `messages` 时，会自动按 `reviewDepth` 读取最近聊天消息。
+2. 自动模式下会监听聊天事件（消息接收/发送、聊天切换、消息删除）驱动调度器，并在卸载时自动解绑。
 
 兼容壳：
 

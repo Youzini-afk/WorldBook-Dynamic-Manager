@@ -42,6 +42,12 @@ export class FloorScheduler {
     this.state.nextDueFloor = this.nextDue(aiFloor);
   }
 
+  reset(currentFloor = 0): void {
+    this.state.locked = false;
+    this.state.lastFloor = currentFloor;
+    this.state.nextDueFloor = this.nextDue(currentFloor);
+  }
+
   getState(): SchedulerState {
     return { ...this.state };
   }

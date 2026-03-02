@@ -49,4 +49,19 @@ describe('FloorScheduler', () => {
     scheduler.unlock();
     expect(scheduler.isLocked()).toBe(false);
   });
+
+  it('reset 会清理锁并重算下一触发楼层', () => {
+    const scheduler = new FloorScheduler({
+      startAfter: 2,
+      interval: 3,
+      triggerTiming: 'after',
+    });
+    scheduler.lock();
+    scheduler.markProcessed(11);
+    scheduler.reset(0);
+    const state = scheduler.getState();
+    expect(state.locked).toBe(false);
+    expect(state.lastFloor).toBe(0);
+    expect(state.nextDueFloor).toBe(5);
+  });
 });
