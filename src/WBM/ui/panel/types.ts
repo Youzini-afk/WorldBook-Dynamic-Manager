@@ -3,6 +3,7 @@ import type {
   ApiPreset,
   BackendChatRecord,
   BookSyncResult,
+  GlobalWorldbookPreset,
   ImportConflictPolicy,
   IsolationInfo,
   IsolationStats,
@@ -27,6 +28,10 @@ export interface PanelBridge {
   listWorldbookNames(targetType?: TargetType): Promise<string[]>;
   getGlobalBindings(): string[];
   setGlobalBindings(names: string[]): Promise<string[]>;
+  listGlobalPresets(): GlobalWorldbookPreset[];
+  saveCurrentGlobalPreset(name: string): Promise<GlobalWorldbookPreset> | GlobalWorldbookPreset;
+  applyGlobalPreset(id: string): Promise<string[]>;
+  deleteGlobalPreset(id: string): Promise<boolean> | boolean;
   listAiManagedNames(): string[];
   listLockedNames(): string[];
   setEntryLocked(uid: number | string, locked: boolean): Promise<void>;

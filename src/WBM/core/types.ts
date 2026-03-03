@@ -119,6 +119,14 @@ export interface PromptPreset {
   updatedAt: string;
 }
 
+export interface GlobalWorldbookPreset {
+  id: string;
+  name: string;
+  worldbooks: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WbmConfig extends SchedulerConfig {
   mode: ReviewMode;
   apiSource: ApiSource;
@@ -313,6 +321,10 @@ export interface WbmPublicApi {
   listWorldbookNames(targetType?: TargetType): Promise<string[]>;
   getGlobalWorldbooks(): string[];
   setGlobalWorldbooks(names: string[]): Promise<string[]>;
+  listGlobalPresets(): GlobalWorldbookPreset[];
+  saveCurrentGlobalPreset(name: string): GlobalWorldbookPreset;
+  applyGlobalPreset(id: string): Promise<string[]>;
+  deleteGlobalPreset(id: string): boolean;
   exportWorldbook(bookName?: string): Promise<string>;
   importWorldbookRaw(
     bookName: string,

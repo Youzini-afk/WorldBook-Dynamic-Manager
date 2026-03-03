@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG } from '../src/WBM/core/config';
 import type {
   ApiPreset,
   BackendChatRecord,
+  GlobalWorldbookPreset,
   IsolationInfo,
   IsolationStats,
   PromptEntry,
@@ -61,6 +62,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
   };
   let entries: WorldbookEntryLike[] = [{ uid: 1, name: '条目A', content: '内容A', enabled: true }];
   let globalBindings: string[] = [];
+  let globalPresets: GlobalWorldbookPreset[] = [];
   let config = makeConfig();
   let status = makeStatus();
   let promptEntries: PromptEntry[] = [];
@@ -124,6 +126,29 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       }
       globalBindings = normalized;
       return [...globalBindings];
+    }),
+    listGlobalPresets: vi.fn(() => globalPresets.map(item => ({ ...item, worldbooks: [...item.worldbooks] }))),
+    saveCurrentGlobalPreset: vi.fn((name: string) => {
+      const next: GlobalWorldbookPreset = {
+        id: `global-${globalPresets.length + 1}`,
+        name,
+        worldbooks: [...globalBindings],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      globalPresets = [...globalPresets, next];
+      return { ...next, worldbooks: [...next.worldbooks] };
+    }),
+    applyGlobalPreset: vi.fn(async (id: string) => {
+      const preset = globalPresets.find(item => item.id === id);
+      if (!preset) return [...globalBindings];
+      globalBindings = [...preset.worldbooks];
+      return [...globalBindings];
+    }),
+    deleteGlobalPreset: vi.fn((id: string) => {
+      const before = globalPresets.length;
+      globalPresets = globalPresets.filter(item => item.id !== id);
+      return globalPresets.length !== before;
     }),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     listLockedNames: vi.fn(() => [...lockedNames]),
@@ -353,6 +378,36 @@ describe('WbmPanel UI', () => {
 
     await clickButton(wrapper, '移除');
     expect(bridge.setGlobalBindings).toHaveBeenLastCalledWith([]);
+  });
+
+  it('全局预设可保存、应用与删除', async () => {
+    const bridge = makeBridge({
+      listWorldbookNames: vi.fn(async () => ['book-A', 'book-B']),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    const globalSelect = wrapper
+      .findAll('select')
+      .find(item => item.text().includes('选择加入全局的世界书'));
+    expect(globalSelect).toBeDefined();
+    await globalSelect!.setValue('book-B');
+    await clickButton(wrapper, '加入全局');
+
+    await wrapper.find('input[placeholder="全局绑定预设名称"]').setValue('常驻方案A');
+    await clickButton(wrapper, '保存为预设');
+    expect(bridge.saveCurrentGlobalPreset).toHaveBeenCalledWith('常驻方案A');
+
+    const presetSelect = wrapper
+      .findAll('select')
+      .find(item => item.text().includes('选择全局预设'));
+    expect(presetSelect).toBeDefined();
+    await presetSelect!.setValue('global-1');
+    await clickButton(wrapper, '应用预设');
+    expect(bridge.applyGlobalPreset).toHaveBeenCalledWith('global-1');
+
+    await clickButton(wrapper, '删除预设');
+    expect(bridge.deleteGlobalPreset).toHaveBeenCalledWith('global-1');
   });
 
   it('提示词/API/调度标签可保存配置', async () => {

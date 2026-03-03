@@ -82,6 +82,21 @@
               <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="removeGlobalBinding(name)">移除</button>
             </div>
           </div>
+          <div class="wbm-row">
+            <input v-model="newGlobalPresetName" placeholder="全局绑定预设名称" />
+            <button class="wbm-btn wbm-btn-mini" @click="saveGlobalPreset">保存为预设</button>
+            <button class="wbm-btn wbm-btn-mini" @click="refreshGlobalPresets">刷新预设</button>
+          </div>
+          <div class="wbm-row">
+            <select v-model="selectedGlobalPresetId">
+              <option value="">选择全局预设</option>
+              <option v-for="preset in globalPresets" :key="`global-preset-${preset.id}`" :value="preset.id">
+                {{ preset.name }}（{{ preset.worldbooks.length }}）
+              </option>
+            </select>
+            <button class="wbm-btn wbm-btn-mini" @click="applyGlobalPreset">应用预设</button>
+            <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="deleteGlobalPreset">删除预设</button>
+          </div>
         </div>
         <div class="wbm-card">
           <strong>查找替换工具</strong>
@@ -639,6 +654,7 @@ import type {
   ApiPreset,
   BackendChatRecord,
   BookSyncResult,
+  GlobalWorldbookPreset,
   ImportConflictPolicy,
   IsolationInfo,
   IsolationStats,
@@ -697,6 +713,9 @@ const worldbookOptions = ref<string[]>([]);
 const selectedWorldbookName = ref('');
 const globalBindings = ref<string[]>([]);
 const globalBindingCandidate = ref('');
+const globalPresets = ref<GlobalWorldbookPreset[]>([]);
+const selectedGlobalPresetId = ref('');
+const newGlobalPresetName = ref('');
 const queue = ref(props.bridge.listQueue());
 const snapshots = ref(props.bridge.listSnapshots());
 const logs = ref(props.bridge.getLogs());
@@ -1168,6 +1187,15 @@ async function refreshGlobalBindings(): Promise<void> {
   }
 }
 
+async function refreshGlobalPresets(): Promise<void> {
+  await runVoid('刷新全局预设', () => {
+    globalPresets.value = props.bridge.listGlobalPresets();
+    if (!globalPresets.value.some(item => item.id === selectedGlobalPresetId.value)) {
+      selectedGlobalPresetId.value = '';
+    }
+  });
+}
+
 async function refreshAiManagedNames(): Promise<void> {
   const next = await runData('刷新 AI 托管标记', () => props.bridge.listAiManagedNames());
   if (next == null) return;
@@ -1299,6 +1327,51 @@ async function clearGlobalBindings(): Promise<void> {
   if (next == null) return;
   globalBindings.value = normalizeNameList(next);
   globalBindingCandidate.value = '';
+}
+
+async function saveGlobalPreset(): Promise<void> {
+  const name = newGlobalPresetName.value.trim();
+  if (!name) {
+    setError('保存全局预设', '预设名称不能为空');
+    return;
+  }
+  const created = await runData('保存全局预设', async () => await props.bridge.saveCurrentGlobalPreset(name));
+  if (created == null) return;
+  newGlobalPresetName.value = '';
+  await refreshGlobalPresets();
+  selectedGlobalPresetId.value = created.id;
+}
+
+async function applyGlobalPreset(): Promise<void> {
+  if (!selectedGlobalPresetId.value) {
+    setError('应用全局预设', '请先选择一个预设');
+    return;
+  }
+  const next = await runData(
+    '应用全局预设',
+    async () => await props.bridge.applyGlobalPreset(selectedGlobalPresetId.value),
+  );
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+}
+
+async function deleteGlobalPreset(): Promise<void> {
+  if (!selectedGlobalPresetId.value) {
+    setError('删除全局预设', '请先选择一个预设');
+    return;
+  }
+  const deletingId = selectedGlobalPresetId.value;
+  const removed = await runData(
+    '删除全局预设',
+    async () => await props.bridge.deleteGlobalPreset(deletingId),
+  );
+  if (removed == null) return;
+  if (!removed) {
+    setError('删除全局预设', '未找到待删除预设');
+    return;
+  }
+  selectedGlobalPresetId.value = '';
+  await refreshGlobalPresets();
 }
 
 async function exportCurrentWorldbook(): Promise<void> {
@@ -1868,6 +1941,7 @@ async function refreshForActiveTab(): Promise<void> {
   if (activeTab.value === 0) {
     await refreshWorldbookOptions();
     await refreshGlobalBindings();
+    await refreshGlobalPresets();
     await refreshEntries();
     await refreshLockedNames();
     await refreshAiManagedNames();
@@ -1973,6 +2047,7 @@ onMounted(async () => {
   await refreshPromptPresets();
   await refreshWorldbookOptions();
   await refreshGlobalBindings();
+  await refreshGlobalPresets();
   await refreshBackendChats();
   await refreshIsolation();
   await refreshActivationLogs();
