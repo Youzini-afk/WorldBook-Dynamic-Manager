@@ -13,6 +13,7 @@ import type {
   ImportConflictPolicy,
   IsolationInfo,
   KeywordScanResult,
+  PendingReviewItem,
   PatchOp,
   RouterResult,
   TargetType,
@@ -81,6 +82,15 @@ function createScheduler(config: {
 function compactText(text: string, maxLength = 280): string {
   if (text.length <= maxLength) return text;
   return `${text.slice(0, maxLength)}...`;
+}
+
+function estimateTokenCount(text: string): number {
+  const normalized = String(text ?? '').trim();
+  if (!normalized) return 0;
+  // 经验值：中文约 1 字符≈1 token，英文约 4 字符≈1 token，取较保守估算。
+  const cjkCount = (normalized.match(/[\u4e00-\u9fa5]/g) ?? []).length;
+  const otherCount = normalized.length - cjkCount;
+  return cjkCount + Math.ceil(otherCount / 4);
 }
 
 function findEntryByName(entries: WorldbookEntryLike[], entryName: string): WorldbookEntryLike | null {
@@ -269,13 +279,16 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       : new TavernAiClient(logger, runtime.review);
   let reviewService = new ReviewService(aiClient, parser, logger);
 
-  let targetBookName = config.targetBookName;
+  let targetBookName = config.targetType === 'global' ? config.targetBookName : '';
   let resolvedBy = 'startup';
   let fallbackUsed = false;
   let lastResolveError = '';
   let processing = false;
   let lastObservedFloor = 0;
   let activeChatId = '';
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let pollSignature = '';
+  let pollLastFloor = 0;
   let launcher: MagicWandLauncher | null = null;
   let panel: VuePanelController;
   let api: WbmPublicApi;
@@ -694,6 +707,26 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     return [...lockedResults, ...results];
   };
 
+  const executePendingItems = async (pendingItems: PendingReviewItem[]): Promise<void> => {
+    for (const pending of pendingItems) {
+      const results = await executeCommandsWithLockGuard(pending.commands, pending.bookName, {
+        approvalMode: 'auto',
+        source: pending.source,
+        floor: pending.floor,
+        chatId: pending.chatId,
+        confirmUpdate: config.confirmUpdate,
+        maxCreatePerRound: config.maxCreatePerRound,
+        patchDuplicateGuard: config.patchDuplicateGuard,
+      });
+      if (!config.aiRegistryEnabled) continue;
+      for (const result of results) {
+        if (result.status !== 'ok') continue;
+        if (result.action !== 'create' && result.action !== 'update' && result.action !== 'patch') continue;
+        aiRegistry.mark(pending.bookName, result.entry_name, pending.source === 'legacy' ? 'manual' : pending.source);
+      }
+    }
+  };
+
   const findEntriesByUids = (
     entries: WorldbookEntryLike[],
     uids: Array<number | string>,
@@ -723,6 +756,23 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     });
   };
 
+  const restoreBackup = async (backupId: string): Promise<void> => {
+    const backup = backupManager.find(backupId);
+    if (!backup) throw new Error(`未找到备份: ${backupId}`);
+    await repository.replaceEntries(backup.bookName, backup.entries);
+    snapshots.save({
+      id: `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      bookName: backup.bookName,
+      createdAt: new Date().toISOString(),
+      reason: `restore-backup:${backup.id}`,
+      entries: backup.entries,
+      floor: lastObservedFloor,
+      chatId: activeChatId || undefined,
+    });
+    logger.info(`已从备份恢复世界书: ${backup.id}`);
+    refreshPanel();
+  };
+
   const executeReview = async (
     bookName: string,
     messages: ChatMessage[],
@@ -748,6 +798,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     let parsedCommands: WorldUpdateCommand[] = [];
     let executionResults: RouterResult[] = [];
     let rawReply = '';
+    let promptTokenEstimate = 0;
+    let replyTokenEstimate = 0;
+    let totalTokenEstimate = 0;
     try {
       const worldbookEntries = await repository.getEntries(bookName).catch(error => {
         logger.warn(`读取世界书失败，使用空上下文: ${bookName}`, error);
@@ -781,6 +834,11 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       promptPreview = compactText(trace.prompts.map(item => `${item.role}:${item.content}`).join('\n'));
       replyPreview = compactText(trace.reply);
       commandCount = trace.commands.length;
+      if (config.tokenEstimateEnabled) {
+        promptTokenEstimate = trace.prompts.reduce((sum, item) => sum + estimateTokenCount(item.content), 0);
+        replyTokenEstimate = estimateTokenCount(trace.reply);
+        totalTokenEstimate = promptTokenEstimate + replyTokenEstimate;
+      }
 
       const results = await executeCommandsWithLockGuard(trace.commands, bookName, {
         approvalMode: config.approvalMode,
@@ -831,6 +889,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         rawReply,
         commands: parsedCommands.map(item => ({ ...item, fields: { ...item.fields }, ops: [...item.ops] })),
         results: executionResults.map(item => ({ ...item })),
+        promptTokenEstimate: config.tokenEstimateEnabled ? promptTokenEstimate : undefined,
+        replyTokenEstimate: config.tokenEstimateEnabled ? replyTokenEstimate : undefined,
+        totalTokenEstimate: config.tokenEstimateEnabled ? totalTokenEstimate : undefined,
         success: !results.some(item => item.status === 'error'),
       });
     } catch (error) {
@@ -850,6 +911,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         rawReply,
         commands: parsedCommands.map(item => ({ ...item, fields: { ...item.fields }, ops: [...item.ops] })),
         results: executionResults.map(item => ({ ...item })),
+        promptTokenEstimate: config.tokenEstimateEnabled ? promptTokenEstimate : undefined,
+        replyTokenEstimate: config.tokenEstimateEnabled ? replyTokenEstimate : undefined,
+        totalTokenEstimate: config.tokenEstimateEnabled ? totalTokenEstimate : undefined,
         success: false,
         error: reason,
       });
@@ -885,7 +949,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const normalized = parseConfig(next);
       const prevFabEnabled = config.fabEnabled;
       Object.assign(config, normalized);
-      targetBookName = config.targetBookName;
+      targetBookName = config.targetType === 'global' ? config.targetBookName : '';
       resolvedBy = 'config';
       fallbackUsed = false;
       lastResolveError = '';
@@ -1020,14 +1084,23 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     rejectAll: async () => {
       await api.rejectQueue();
     },
-    approveOne: async id => {
-      await api.approveQueue([id]);
+    approveOne: async (id, commandIndex) => {
+      await api.approveOne(id, commandIndex);
     },
-    rejectOne: async id => {
-      await api.rejectQueue([id]);
+    rejectOne: async (id, commandIndex) => {
+      await api.rejectOne(id, commandIndex);
     },
     listQueue: () => queue.list(),
     listSnapshots: bookName => snapshots.list(bookName),
+    listBackups: bookName => backupManager.list(bookName),
+    restoreBackup: async backupId => {
+      await restoreBackup(backupId);
+    },
+    deleteBackup: async backupId => {
+      const deleted = backupManager.remove(backupId);
+      if (deleted) refreshPanel();
+      return deleted;
+    },
     listPromptEntries: () => promptEntryManager.list(),
     savePromptEntries: async entries => {
       promptEntryManager.replace(entries);
@@ -1402,24 +1475,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     },
     approveQueue: async ids => {
       const pendingItems = queue.take(ids);
-      for (const pending of pendingItems) {
-        const results = await executeCommandsWithLockGuard(pending.commands, pending.bookName, {
-          approvalMode: 'auto',
-          source: pending.source,
-          floor: pending.floor,
-          chatId: pending.chatId,
-          confirmUpdate: config.confirmUpdate,
-          maxCreatePerRound: config.maxCreatePerRound,
-          patchDuplicateGuard: config.patchDuplicateGuard,
-        });
-        if (config.aiRegistryEnabled) {
-          for (const result of results) {
-            if (result.status !== 'ok') continue;
-            if (result.action !== 'create' && result.action !== 'update' && result.action !== 'patch') continue;
-            aiRegistry.mark(pending.bookName, result.entry_name, pending.source === 'legacy' ? 'manual' : pending.source);
-          }
-        }
-      }
+      await executePendingItems(pendingItems);
       refreshPanel();
     },
     rejectQueue: async ids => {
@@ -1493,10 +1549,33 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     getPendingQueue: () => queue.getPending(),
     getPendingCount: () => queue.count(),
     approveAll: async ids => await api.approveQueue(ids),
-    approveOne: async id => await api.approveQueue([id]),
+    approveOne: async (id, commandIndex) => {
+      if (commandIndex == null) {
+        await api.approveQueue([id]);
+        return;
+      }
+      const pending = queue.takeCommand(id, commandIndex);
+      if (!pending) throw new Error(`未找到待审批指令: id=${id} index=${commandIndex}`);
+      await executePendingItems([pending]);
+      refreshPanel();
+    },
     rejectAll: async ids => await api.rejectQueue(ids),
-    rejectOne: async id => await api.rejectQueue([id]),
+    rejectOne: async (id, commandIndex) => {
+      if (commandIndex == null) return await api.rejectQueue([id]);
+      const rejected = queue.rejectCommand(id, commandIndex);
+      refreshPanel();
+      return rejected;
+    },
     getSnapshots: bookName => snapshots.list(bookName),
+    listBackups: bookName => backupManager.list(bookName),
+    restoreBackup: async backupId => {
+      await restoreBackup(backupId);
+    },
+    deleteBackup: async backupId => {
+      const deleted = backupManager.remove(backupId);
+      if (deleted) refreshPanel();
+      return deleted;
+    },
     cleanupQueue: () => queue.cleanup(),
     clearQueue: () => queue.clearAll(),
 
@@ -1505,9 +1584,39 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     clearMyIsolation: (bookName?: string) => isolation.clearMine(bookName),
     clearAllIsolation: (bookName?: string) => isolation.clearAll(bookName),
     promoteIsolationToGlobal: async (_bookName?: string) => {
-      // v3 中该操作只返回候选列表并清理隔离映射，不自动写入条目。
-      const promoted = isolation.promoteToGlobal(_bookName);
-      logger.info(`隔离条目已标记晋升: ${promoted.length}`);
+      const target = String(_bookName ?? targetBookName ?? '').trim();
+      if (!target) throw new Error('未解析目标世界书，无法晋升隔离条目');
+
+      const promotedNames = new Set(
+        isolation
+          .promoteToGlobal(target)
+          .map(name => String(name).trim())
+          .filter(Boolean),
+      );
+      if (promotedNames.size === 0) {
+        logger.info('未找到可晋升的隔离条目');
+        return;
+      }
+
+      const entries = await repository.getEntries(target);
+      const matched = entries.filter(entry => {
+        const name = getEntryDisplayName(entry);
+        if (!name || !promotedNames.has(name)) return false;
+        const automationId = String(entry.automationId ?? '').trim();
+        return automationId.startsWith('WBM_ISO_');
+      });
+      if (matched.length === 0) {
+        logger.info(`隔离映射存在 ${promotedNames.size} 条，但未命中 automationId 条目`);
+        return;
+      }
+
+      await saveRuntimeSnapshot(target, `isolation:promote:${matched.length}`);
+      for (const entry of matched) {
+        await repository.updateEntry(target, { ...entry, automationId: '' });
+      }
+      isolation.clearAll(target);
+      logger.info(`隔离条目已晋升为全局: ${matched.length}`);
+      refreshPanel();
     },
     listBackendChats: () => [...backendChats],
     exportBackendChats: ids => panelBridge.exportBackendChats(ids),
@@ -1540,7 +1649,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   );
 
   const resetRuntimeState = (reason: string): void => {
-    targetBookName = config.targetBookName;
+    targetBookName = config.targetType === 'global' ? config.targetBookName : '';
     resolvedBy = 'reset';
     fallbackUsed = false;
     lastResolveError = '';
@@ -1548,6 +1657,59 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     lastObservedFloor = 0;
     logger.info(reason);
     refreshPanel();
+  };
+
+  const readPollingSignature = (): { floor: number; signature: string } => {
+    const depth = Math.max(config.reviewDepth, 80);
+    const recent = collectRecentChatMessages(depth, runtime.chat);
+    const floor = recent.length;
+    const tail = recent
+      .slice(-3)
+      .map(item => `${item.role}:${item.content.slice(-80)}`)
+      .join('\n');
+    return {
+      floor,
+      signature: `${activeChatId}|${floor}|${tail}`,
+    };
+  };
+
+  const stopPollingFallback = (): void => {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+    pollSignature = '';
+    pollLastFloor = 0;
+  };
+
+  const startPollingFallback = (): void => {
+    if (runtimeHealth.eventSourceAvailable) return;
+    if (typeof runtime.chat.getChatMessages !== 'function') {
+      logger.warn('事件源不可用，且无法启用轮询兜底（getChatMessages 不可用）');
+      return;
+    }
+    stopPollingFallback();
+    const init = readPollingSignature();
+    pollSignature = init.signature;
+    pollLastFloor = init.floor;
+    pollTimer = setInterval(() => {
+      const next = readPollingSignature();
+      if (!next.signature || next.signature === pollSignature) return;
+
+      const prevFloor = pollLastFloor;
+      pollSignature = next.signature;
+      pollLastFloor = next.floor;
+
+      if (next.floor < prevFloor) {
+        scheduler.reset(next.floor);
+        lastObservedFloor = Math.min(lastObservedFloor, next.floor);
+        logger.info(`轮询检测到消息回退，已重置调度: floor=${next.floor}`);
+        refreshPanel('background');
+        return;
+      }
+
+      void runAutoReview('after', next.floor);
+    }, 1500);
+    logger.warn('事件源不可用，已启用轮询兜底监听');
   };
 
   events.on(eventMessageReceived, (...args) => {
@@ -1629,6 +1791,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     refreshPanel();
   });
 
+  startPollingFallback();
+
   const legacyShell = buildLegacyShell(api, logger);
   const hostWindow = runtime.ui.windowRef;
   if (hostWindow) {
@@ -1650,6 +1814,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     api,
     legacyShell,
     dispose: () => {
+      stopPollingFallback();
       events.clear();
       panel.destroy();
       launcher?.destroy();

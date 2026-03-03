@@ -93,6 +93,16 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       floor: 10,
     },
   ];
+  let backups: SnapshotRecord[] = [
+    {
+      id: 'b1',
+      bookName: 'book-A',
+      createdAt: new Date().toISOString(),
+      reason: 'pre-review:auto',
+      entries: [],
+      floor: 10,
+    },
+  ];
   let logs: LogRecord[] = [
     {
       level: 'info',
@@ -302,6 +312,17 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
         .filter(item => !bookName || item.bookName === bookName)
         .map(item => ({ ...item, entries: [...item.entries] })),
     ),
+    listBackups: vi.fn((bookName?: string) =>
+      backups
+        .filter(item => !bookName || item.bookName === bookName)
+        .map(item => ({ ...item, entries: [...item.entries] })),
+    ),
+    restoreBackup: vi.fn(async (_backupId: string) => undefined),
+    deleteBackup: vi.fn(async (backupId: string) => {
+      const before = backups.length;
+      backups = backups.filter(item => item.id !== backupId);
+      return before !== backups.length;
+    }),
     listPromptEntries: vi.fn(() => promptEntries.map(item => ({ ...item }))),
     savePromptEntries: vi.fn(async (next: PromptEntry[]) => {
       promptEntries = next.map(item => ({ ...item }));
@@ -542,6 +563,39 @@ describe('WbmPanel UI', () => {
     expect(wrapper.text()).toContain('ready');
     await clickButton(wrapper, '清空日志');
     expect(bridge.clearLogs).toHaveBeenCalledTimes(1);
+  });
+
+  it('审核队列支持逐条指令审批', async () => {
+    const bridge = makeBridge({
+      listQueue: vi.fn(() => [
+        {
+          id: 'q-cmd',
+          bookName: 'book-A',
+          source: 'manual' as const,
+          createdAt: new Date().toISOString(),
+          floor: 8,
+          commands: [
+            { action: 'create' as const, entry_name: '条目1', fields: {}, ops: [] },
+            { action: 'update' as const, entry_name: '条目2', fields: {}, ops: [] },
+          ],
+        },
+      ]),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    await clickTab(wrapper, '调试');
+    const approve = wrapper.findAll('button').find(item => item.text() === '通过此条');
+    const reject = wrapper.findAll('button').find(item => item.text() === '拒绝此条');
+    expect(approve).toBeDefined();
+    expect(reject).toBeDefined();
+
+    await approve!.trigger('click');
+    await reject!.trigger('click');
+    await flushPromises();
+
+    expect(bridge.approveOne).toHaveBeenCalledWith('q-cmd', 0);
+    expect(bridge.rejectOne).toHaveBeenCalledWith('q-cmd', 0);
   });
 
   it('失败路径会显示错误条并可清除', async () => {

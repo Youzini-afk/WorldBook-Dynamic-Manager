@@ -232,6 +232,9 @@ export interface BackendChatRecord {
   rawReply?: string;
   commands?: WorldUpdateCommand[];
   results?: RouterResult[];
+  promptTokenEstimate?: number;
+  replyTokenEstimate?: number;
+  totalTokenEstimate?: number;
   success: boolean;
   error?: string;
 }
@@ -367,10 +370,13 @@ export interface WbmPublicApi {
   getPendingQueue(): PendingReviewItem[];
   getPendingCount(): number;
   approveAll(ids?: string[]): Promise<void>;
-  approveOne(id: string): Promise<void>;
+  approveOne(id: string, commandIndex?: number): Promise<void>;
   rejectAll(ids?: string[]): Promise<number>;
-  rejectOne(id: string): Promise<number>;
+  rejectOne(id: string, commandIndex?: number): Promise<number>;
   getSnapshots(bookName?: string): SnapshotRecord[];
+  listBackups(bookName?: string): SnapshotRecord[];
+  restoreBackup(backupId: string): Promise<void>;
+  deleteBackup(backupId: string): Promise<boolean>;
   cleanupQueue(): number;
   clearQueue(): number;
 

@@ -65,6 +65,34 @@ export class PendingQueue {
     return take;
   }
 
+  takeCommand(id: string, commandIndex: number): PendingReviewItem | null {
+    if (!Number.isInteger(commandIndex) || commandIndex < 0) return null;
+    const itemIndex = this.items.findIndex(item => item.id === id);
+    if (itemIndex < 0) return null;
+
+    const current = this.items[itemIndex];
+    if (!Array.isArray(current.commands) || commandIndex >= current.commands.length) return null;
+
+    const command = current.commands[commandIndex];
+    if (!command) return null;
+    const nextCommands = current.commands.filter((_, index) => index !== commandIndex);
+
+    if (nextCommands.length === 0) {
+      this.items.splice(itemIndex, 1);
+    } else {
+      this.items[itemIndex] = {
+        ...current,
+        commands: nextCommands,
+      };
+    }
+    this.persist();
+
+    return clone({
+      ...current,
+      commands: [command],
+    });
+  }
+
   reject(ids?: string[]): number {
     if (!ids || ids.length === 0) {
       const count = this.items.length;
@@ -78,6 +106,27 @@ export class PendingQueue {
     this.items.splice(0, this.items.length, ...keep);
     this.persist();
     return count;
+  }
+
+  rejectCommand(id: string, commandIndex: number): number {
+    if (!Number.isInteger(commandIndex) || commandIndex < 0) return 0;
+    const itemIndex = this.items.findIndex(item => item.id === id);
+    if (itemIndex < 0) return 0;
+
+    const current = this.items[itemIndex];
+    if (!Array.isArray(current.commands) || commandIndex >= current.commands.length) return 0;
+
+    const nextCommands = current.commands.filter((_, index) => index !== commandIndex);
+    if (nextCommands.length === 0) {
+      this.items.splice(itemIndex, 1);
+    } else {
+      this.items[itemIndex] = {
+        ...current,
+        commands: nextCommands,
+      };
+    }
+    this.persist();
+    return 1;
   }
 
   rejectOne(id: string): number {

@@ -138,6 +138,8 @@ export class TargetBookResolver {
         return currentName != null;
       } catch (error) {
         this.logger.warn('读取当前角色卡名称失败', error);
+        // 若宿主提供了该接口但调用失败，不再继续使用次级接口“猜测”角色状态。
+        return false;
       }
     }
 
@@ -210,6 +212,11 @@ export class TargetBookResolver {
     managedFallbackPolicy: ManagedFallbackPolicy,
   ): Promise<ResolveBookResult> {
     const preferred = targetBookName || undefined;
+    const hasCharacter = await this.hasCurrentCharacter();
+
+    if (!hasCharacter) {
+      throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
+    }
 
     const existing = this.tryGetChatWorldbookName();
     if (existing) {
@@ -219,13 +226,8 @@ export class TargetBookResolver {
         fallbackUsed: false,
       };
     }
-    const hasCharacter = await this.hasCurrentCharacter();
 
     if (typeof this.api.getOrCreateChatWorldbook === 'function') {
-      if (!hasCharacter) {
-        throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
-      }
-
       const getOrCreate = this.api.getOrCreateChatWorldbook as (
         chat_name?: 'current',
         worldbook_name?: string,
@@ -258,18 +260,12 @@ export class TargetBookResolver {
     }
 
     if (managedFallbackPolicy === 'strict') {
-      if (!hasCharacter) {
-        throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
-      }
       if (preferred) {
         this.logger.warn(`strict 模式下忽略配置目标世界书名: ${preferred}`);
       }
       throw new Error('托管模式接口不可用，且 strict 策略禁止回退世界书');
     }
 
-    if (!hasCharacter) {
-      throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
-    }
     if (preferred) {
       this.logger.warn(`托管接口不可用，fallback 模式忽略配置目标世界书名: ${preferred}`);
     }

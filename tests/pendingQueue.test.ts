@@ -162,4 +162,65 @@ describe('PendingQueue', () => {
     expect(queue.cleanup()).toBe(1);
     expect(queue.list().map(item => item.id).sort()).toEqual(['new', 'unknown']);
   });
+
+  it('支持按命令索引提取/拒绝单条指令', () => {
+    const queue = new PendingQueue(memoryStorage());
+    queue.enqueue({
+      id: 'q-cmd',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [
+        { action: 'create', entry_name: 'A', fields: {}, ops: [] },
+        { action: 'update', entry_name: 'B', fields: {}, ops: [] },
+      ],
+    });
+
+    const taken = queue.takeCommand('q-cmd', 1);
+    expect(taken).not.toBeNull();
+    expect(taken?.commands).toHaveLength(1);
+    expect(taken?.commands[0]?.entry_name).toBe('B');
+    expect(queue.list()[0]?.commands).toHaveLength(1);
+    expect(queue.list()[0]?.commands[0]?.entry_name).toBe('A');
+
+    expect(queue.rejectCommand('q-cmd', 0)).toBe(1);
+    expect(queue.size()).toBe(0);
+  });
+
+  it('rejectCommand 在非末条场景下应仅移除指定指令', () => {
+    const queue = new PendingQueue(memoryStorage());
+    queue.enqueue({
+      id: 'q-keep',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [
+        { action: 'create', entry_name: 'A', fields: {}, ops: [] },
+        { action: 'update', entry_name: 'B', fields: {}, ops: [] },
+      ],
+    });
+
+    expect(queue.rejectCommand('q-keep', 0)).toBe(1);
+    expect(queue.list()).toHaveLength(1);
+    expect(queue.list()[0]?.commands).toHaveLength(1);
+    expect(queue.list()[0]?.commands[0]?.entry_name).toBe('B');
+  });
+
+  it('takeCommand/rejectCommand 对非法索引与缺失任务应返回空结果', () => {
+    const queue = new PendingQueue(memoryStorage());
+    queue.enqueue({
+      id: 'q-err',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [{ action: 'create', entry_name: 'A', fields: {}, ops: [] }],
+    });
+
+    expect(queue.takeCommand('q-err', -1)).toBeNull();
+    expect(queue.takeCommand('missing', 0)).toBeNull();
+    expect(queue.takeCommand('q-err', 5)).toBeNull();
+    expect(queue.rejectCommand('q-err', -1)).toBe(0);
+    expect(queue.rejectCommand('missing', 0)).toBe(0);
+    expect(queue.rejectCommand('q-err', 5)).toBe(0);
+  });
 });

@@ -49,10 +49,13 @@ export interface PanelBridge {
   manualReview(): Promise<void>;
   approveAll(): Promise<void>;
   rejectAll(): Promise<void>;
-  approveOne(id: string): Promise<void>;
-  rejectOne(id: string): Promise<void>;
+  approveOne(id: string, commandIndex?: number): Promise<void>;
+  rejectOne(id: string, commandIndex?: number): Promise<void>;
   listQueue(): PendingReviewItem[];
   listSnapshots(bookName?: string): SnapshotRecord[];
+  listBackups(bookName?: string): SnapshotRecord[];
+  restoreBackup(backupId: string): Promise<void>;
+  deleteBackup(backupId: string): Promise<boolean>;
   rollback(snapshotId: string): Promise<void>;
   rollbackFloor(floor: number, chatId?: string): Promise<void>;
   getApiConfig(): WbmApiConfig;

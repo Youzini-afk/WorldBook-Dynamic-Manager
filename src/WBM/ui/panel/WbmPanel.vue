@@ -638,6 +638,11 @@
             </div>
             <div>来源: {{ selectedBackendRecord.source }} | 楼层: {{ selectedBackendRecord.floor ?? '-' }} | 聊天: {{ selectedBackendRecord.chatId ?? '-' }}</div>
             <div>请求消息: {{ selectedBackendRecord.promptMessages?.length ?? 0 }} 条 | 指令: {{ selectedBackendRecord.commandCount }}</div>
+            <div v-if="selectedBackendRecord.totalTokenEstimate != null">
+              Token 估算: prompt={{ selectedBackendRecord.promptTokenEstimate ?? 0 }}
+              + reply={{ selectedBackendRecord.replyTokenEstimate ?? 0 }}
+              = total={{ selectedBackendRecord.totalTokenEstimate }}
+            </div>
             <details class="wbm-details">
               <summary>Prompt 预览</summary>
               <pre class="wbm-logs is-inline">{{ formatBackendMessages(selectedBackendRecord.promptMessages) }}</pre>
@@ -679,8 +684,21 @@
             <div class="wbm-row is-spread">
               <span>{{ item.id }} | floor={{ item.floor ?? '-' }} | {{ item.commands.length }} 条</span>
               <div class="wbm-row">
-                <button class="wbm-btn wbm-btn-mini" @click="approveOne(item.id)">通过</button>
-                <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="rejectOne(item.id)">拒绝</button>
+                <button class="wbm-btn wbm-btn-mini" @click="approveOne(item.id)">全部通过</button>
+                <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="rejectOne(item.id)">全部拒绝</button>
+              </div>
+            </div>
+            <div
+              v-for="(command, commandIndex) in item.commands"
+              :key="`${item.id}-${commandIndex}-${command.action}-${command.entry_name}`"
+              class="wbm-item is-small"
+            >
+              <div class="wbm-row is-spread">
+                <span>#{{ commandIndex + 1 }} {{ formatQueueCommand(command) }}</span>
+                <div class="wbm-row">
+                  <button class="wbm-btn wbm-btn-mini" @click="approveOne(item.id, commandIndex)">通过此条</button>
+                  <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="rejectOne(item.id, commandIndex)">拒绝此条</button>
+                </div>
               </div>
             </div>
           </div>
@@ -726,6 +744,21 @@
                 {{ item.id }} | floor={{ item.floor ?? '-' }} | {{ item.reason }}
               </span>
               <button class="wbm-btn wbm-btn-mini" @click="rollbackSnapshot(item.id)">回滚</button>
+            </div>
+          </div>
+        </div>
+        <div class="wbm-card">
+          <strong>备份</strong>
+          <div class="wbm-row">
+            <button class="wbm-btn" @click="refreshBackups">刷新备份</button>
+          </div>
+          <div v-for="item in backups" :key="item.id" class="wbm-item is-small">
+            <div class="wbm-row is-spread">
+              <span>{{ item.id }} | {{ item.bookName }} | {{ item.reason }}</span>
+              <div class="wbm-row">
+                <button class="wbm-btn wbm-btn-mini" @click="restoreBackup(item.id)">恢复</button>
+                <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="deleteBackup(item.id)">删除</button>
+              </div>
             </div>
           </div>
         </div>
@@ -871,6 +904,7 @@ const selectedGlobalPresetId = ref('');
 const newGlobalPresetName = ref('');
 const queue = ref(props.bridge.listQueue());
 const snapshots = ref(props.bridge.listSnapshots());
+const backups = ref(props.bridge.listBackups());
 const logs = ref(props.bridge.getLogs());
 const lastError = ref('');
 const promptEntriesText = ref('');
@@ -1109,6 +1143,12 @@ function formatBackendResults(record: BackendChatRecord): string {
     error: record.error ?? null,
   };
   return JSON.stringify(payload, null, 2);
+}
+
+function formatQueueCommand(command: { action?: unknown; entry_name?: unknown }): string {
+  const action = String(command.action ?? '').trim() || 'unknown';
+  const entryName = String(command.entry_name ?? '').trim() || '(未命名条目)';
+  return `${action} -> ${entryName}`;
 }
 
 function downloadJsonFile(filename: string, content: string): void {
@@ -1413,6 +1453,12 @@ async function refreshSnapshots(): Promise<void> {
   const next = await runData('刷新快照', () => props.bridge.listSnapshots());
   if (next == null) return;
   snapshots.value = next;
+}
+
+async function refreshBackups(): Promise<void> {
+  const next = await runData('刷新备份', () => props.bridge.listBackups());
+  if (next == null) return;
+  backups.value = next;
 }
 
 async function refreshLogs(): Promise<void> {
@@ -2094,9 +2140,9 @@ async function approveAll(): Promise<void> {
   await refreshQueue();
 }
 
-async function approveOne(id: string): Promise<void> {
+async function approveOne(id: string, commandIndex?: number): Promise<void> {
   const ok = await runVoid('通过单条队列', async () => {
-    await props.bridge.approveOne(id);
+    await props.bridge.approveOne(id, commandIndex);
   });
   if (!ok) return;
   await refreshQueue();
@@ -2110,9 +2156,9 @@ async function rejectAll(): Promise<void> {
   await refreshQueue();
 }
 
-async function rejectOne(id: string): Promise<void> {
+async function rejectOne(id: string, commandIndex?: number): Promise<void> {
   const ok = await runVoid('拒绝单条队列', async () => {
-    await props.bridge.rejectOne(id);
+    await props.bridge.rejectOne(id, commandIndex);
   });
   if (!ok) return;
   await refreshQueue();
@@ -2124,6 +2170,24 @@ async function rollbackSnapshot(snapshotId: string): Promise<void> {
   });
   if (!ok) return;
   await refreshSnapshots();
+}
+
+async function restoreBackup(backupId: string): Promise<void> {
+  const ok = await runVoid('恢复备份', async () => {
+    await props.bridge.restoreBackup(backupId);
+  });
+  if (!ok) return;
+  await refreshEntries();
+  await refreshSnapshots();
+  await refreshBackups();
+}
+
+async function deleteBackup(backupId: string): Promise<void> {
+  const ok = await runVoid('删除备份', async () => {
+    await props.bridge.deleteBackup(backupId);
+  });
+  if (!ok) return;
+  await refreshBackups();
 }
 
 async function rollbackFloor(): Promise<void> {
@@ -2249,6 +2313,7 @@ async function refreshForActiveTab(options?: { forceEntries?: boolean }): Promis
   if (activeTab.value === 5) {
     await refreshQueue();
     await refreshSnapshots();
+    await refreshBackups();
     await refreshIsolation();
     await refreshActivationLogs();
     return;
@@ -2322,6 +2387,8 @@ onMounted(async () => {
 
   const initSnapshots = await runData('初始化快照', () => props.bridge.listSnapshots());
   if (initSnapshots != null) snapshots.value = initSnapshots;
+  const initBackups = await runData('初始化备份', () => props.bridge.listBackups());
+  if (initBackups != null) backups.value = initBackups;
 
   const initLogs = await runData('初始化日志', () => props.bridge.getLogs());
   if (initLogs != null) logs.value = initLogs;
