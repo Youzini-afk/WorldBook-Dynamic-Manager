@@ -23,6 +23,9 @@ interface RuntimeGlobal {
     ): Promise<{ deleted: number; skipped: number }>;
     listBackendChats(): unknown[];
     exportBackendChats(ids?: string[]): string;
+    listWorldbookNames(targetType?: 'charPrimary' | 'charAdditional' | 'global' | 'managed'): Promise<string[]>;
+    listActivationLogs(): unknown[];
+    clearActivationLogs(): void;
     rollbackFloor(floor: number, chatId?: string): Promise<void>;
   };
   WBM?: {
@@ -58,6 +61,9 @@ describe('bootstrapWbmV3 API bridge', () => {
     expect(runtime.WBM3?.listLockedEntries()).toEqual([]);
     expect(runtime.WBM3?.listBackendChats()).toEqual([]);
     expect(typeof runtime.WBM3?.exportBackendChats()).toBe('string');
+    await expect(runtime.WBM3!.listWorldbookNames('global')).resolves.toEqual([]);
+    expect(runtime.WBM3!.listActivationLogs()).toEqual([]);
+    expect(() => runtime.WBM3!.clearActivationLogs()).not.toThrow();
     expect(runtime.WBM3?.setEntryLock('bookA', 'entry-1', true)).toBe(true);
     expect(runtime.WBM3?.listLockedEntries('bookA')).toEqual(['entry-1']);
 

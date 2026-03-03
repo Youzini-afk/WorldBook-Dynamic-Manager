@@ -110,7 +110,8 @@ export function getRuntimeEventName(
     | 'CHAT_CHANGED'
     | 'CHARACTER_PAGE_LOADED'
     | 'CHARACTER_EDITED'
-    | 'CHARACTER_FIRST_MESSAGE_SELECTED',
+    | 'CHARACTER_FIRST_MESSAGE_SELECTED'
+    | 'WORLD_INFO_ACTIVATED',
   fallback: string,
 ): string {
   return caps.events.tavernEvents?.[key] ?? fallback;

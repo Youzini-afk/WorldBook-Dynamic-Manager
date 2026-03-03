@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: WbmConfig = {
   apiSource: 'custom',
   targetType: 'charPrimary',
   targetBookName: '',
+  managedFallbackPolicy: 'strict',
 
   externalEndpoint: '',
   externalApiKey: '',
@@ -82,6 +83,7 @@ const configSchema = z.object({
   apiSource: z.enum(['tavern', 'custom']).catch(DEFAULT_CONFIG.apiSource),
   targetType: z.enum(['charPrimary', 'charAdditional', 'global', 'managed']).catch(DEFAULT_CONFIG.targetType),
   targetBookName: z.string().catch(DEFAULT_CONFIG.targetBookName),
+  managedFallbackPolicy: z.enum(['strict', 'fallback']).catch(DEFAULT_CONFIG.managedFallbackPolicy),
 
   externalEndpoint: z.string().catch(DEFAULT_CONFIG.externalEndpoint),
   externalApiKey: z.string().catch(DEFAULT_CONFIG.externalApiKey),

@@ -110,6 +110,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       apiConfig = { ...next };
     }),
     listEntries: vi.fn(async () => entries.map(item => ({ ...item }))),
+    listWorldbookNames: vi.fn(async () => ['book-A']),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     listLockedNames: vi.fn(() => [...lockedNames]),
     setEntryLocked: vi.fn(async (uid: number | string, locked: boolean) => {
@@ -169,6 +170,8 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
     manualReview: vi.fn(async () => undefined),
     approveAll: vi.fn(async () => undefined),
     rejectAll: vi.fn(async () => undefined),
+    approveOne: vi.fn(async () => undefined),
+    rejectOne: vi.fn(async () => undefined),
     listQueue: vi.fn(() => queue.map(item => ({ ...item, commands: [...item.commands] }))),
     listSnapshots: vi.fn((bookName?: string) =>
       snapshots
@@ -215,6 +218,17 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
     }),
     listBackendChats: vi.fn(() => backendChats.map(item => ({ ...item }))),
     exportBackendChats: vi.fn(() => JSON.stringify({ records: backendChats })),
+    exportWorldbook: vi.fn(async () => JSON.stringify({ name: 'book-A', entries })),
+    importWorldbookRaw: vi.fn(async () => ({
+      bookName: 'book-A',
+      strategy: 'overwrite' as const,
+      imported: 1,
+      skipped: 0,
+      renamed: 0,
+    })),
+    listActivationLogs: vi.fn(() => []),
+    clearActivationLogs: vi.fn(() => undefined),
+    exportActivationLogs: vi.fn(() => JSON.stringify({ records: [] })),
     verifyCurrentBook: vi.fn(async () => ({
       ok: true,
       checkedAt: new Date().toISOString(),

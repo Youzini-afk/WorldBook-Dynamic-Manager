@@ -4,11 +4,13 @@ export type ReviewMode = 'inline' | 'external';
 export type ApiSource = 'tavern' | 'custom';
 export type ApiType = 'openai' | 'custom' | 'gemini';
 export type TargetType = 'charPrimary' | 'charAdditional' | 'global' | 'managed';
+export type ManagedFallbackPolicy = 'strict' | 'fallback';
 export type ApprovalMode = 'auto' | 'manual' | 'selective';
 export type ContextMode = 'full' | 'triggered' | 'summary';
 export type ContentFilterMode = 'none' | 'tags';
 export type RefreshMode = 'full' | 'minimal';
 export type RouterStatus = 'ok' | 'skipped' | 'queued' | 'error';
+export type ImportConflictPolicy = 'overwrite' | 'skip_duplicate' | 'merge_rename';
 
 export type WbmErrorCode =
   | 'PARSER_TAG_NOT_FOUND'
@@ -122,6 +124,7 @@ export interface WbmConfig extends SchedulerConfig {
   apiSource: ApiSource;
   targetType: TargetType;
   targetBookName: string;
+  managedFallbackPolicy: ManagedFallbackPolicy;
 
   // 兼容 v2/v3 旧字段
   externalEndpoint: string;
@@ -225,6 +228,24 @@ export interface BackendChatRecord {
   error?: string;
 }
 
+export interface WorldbookImportResult {
+  bookName: string;
+  strategy: ImportConflictPolicy;
+  imported: number;
+  skipped: number;
+  renamed: number;
+}
+
+export interface ActivationLogRecord {
+  id: string;
+  time: string;
+  bookName: string;
+  uid: string;
+  name: string;
+  preview: string;
+  source: 'world_info_activated';
+}
+
 export interface WbmDepsState {
   highLevelWorldbook: boolean;
   legacyWorldbook: boolean;
@@ -245,6 +266,9 @@ export interface WbmStatus {
   pendingCount?: number;
   depsState?: WbmDepsState;
   contextSource?: string;
+  resolvedBy?: string;
+  fallbackUsed?: boolean;
+  lastResolveError?: string;
 }
 
 export interface LoggerLike {
@@ -286,6 +310,13 @@ export interface WbmPublicApi {
   getStatus(): WbmStatus;
 
   getEntries(bookName?: string): Promise<WorldbookEntryLike[]>;
+  listWorldbookNames(targetType?: TargetType): Promise<string[]>;
+  exportWorldbook(bookName?: string): Promise<string>;
+  importWorldbookRaw(
+    bookName: string,
+    payload: unknown,
+    strategy?: ImportConflictPolicy,
+  ): Promise<WorldbookImportResult>;
   listLockedEntries(bookName?: string): string[];
   setEntryLock(bookName: string, entryName: string, locked: boolean): boolean;
   addEntry(bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void>;
@@ -331,6 +362,8 @@ export interface WbmPublicApi {
 
   listBackendChats(): BackendChatRecord[];
   exportBackendChats(ids?: string[]): string;
+  listActivationLogs(): ActivationLogRecord[];
+  clearActivationLogs(): void;
 }
 
 export interface WbmLegacyApi extends WbmPublicApi {}

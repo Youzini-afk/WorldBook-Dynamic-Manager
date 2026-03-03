@@ -61,6 +61,7 @@ describe('bootstrap lifecycle', () => {
         CHARACTER_PAGE_LOADED: 'character_page_loaded',
         CHARACTER_EDITED: 'character_edited',
         CHARACTER_FIRST_MESSAGE_SELECTED: 'character_first_message_selected',
+        WORLD_INFO_ACTIVATED: 'world_info_activated',
       },
     };
 
@@ -68,5 +69,6 @@ describe('bootstrap lifecycle', () => {
     expect(subscribedEvents).toContain('character_page_loaded');
     expect(subscribedEvents).toContain('character_edited');
     expect(subscribedEvents).toContain('character_first_message_selected');
+    expect(subscribedEvents).toContain('world_info_activated');
   });
 });

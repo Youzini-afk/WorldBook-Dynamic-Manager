@@ -79,6 +79,7 @@ export interface RuntimeEventApi {
     CHARACTER_PAGE_LOADED?: string;
     CHARACTER_EDITED?: string;
     CHARACTER_FIRST_MESSAGE_SELECTED?: string;
+    WORLD_INFO_ACTIVATED?: string;
   };
 }
 

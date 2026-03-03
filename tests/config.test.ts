@@ -23,6 +23,7 @@ describe('config', () => {
   it('在空存储时返回默认配置', () => {
     const config = loadConfig(memoryStorage());
     expect(config).toEqual(DEFAULT_CONFIG);
+    expect(config.managedFallbackPolicy).toBe('strict');
   });
 
   it('保存后可正确读回', () => {
@@ -57,8 +58,10 @@ describe('config', () => {
     const parsed = parseConfig({
       ...DEFAULT_CONFIG,
       approvalMode: 'bad-value',
+      managedFallbackPolicy: 'unsupported',
     });
     expect(parsed.approvalMode).toBe(DEFAULT_CONFIG.approvalMode);
+    expect(parsed.managedFallbackPolicy).toBe(DEFAULT_CONFIG.managedFallbackPolicy);
   });
 
   it('clearConfig 会清空配置', () => {

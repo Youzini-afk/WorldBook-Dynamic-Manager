@@ -7,16 +7,20 @@ import {
   type StorageLike,
 } from '../core/config';
 import type {
+  ActivationLogRecord,
   BackendChatRecord,
   BookSyncResult,
+  ImportConflictPolicy,
   IsolationInfo,
   KeywordScanResult,
   PatchOp,
   RouterResult,
+  TargetType,
   WbmApiConfig,
   WbmLegacyApi,
   WbmPublicApi,
   WbmStatus,
+  WorldbookImportResult,
   WorldUpdateCommand,
   WorldbookEntryLike,
 } from '../core/types';
@@ -103,6 +107,59 @@ function getEntryDisplayName(entry: WorldbookEntryLike): string {
 
 function normalizeEntryName(input: string): string {
   return input.trim().toLowerCase();
+}
+
+function cloneEntryList(entries: WorldbookEntryLike[]): WorldbookEntryLike[] {
+  return entries.map(entry => ({ ...entry }));
+}
+
+function parseImportedEntries(payload: unknown): Partial<WorldbookEntryLike>[] {
+  const source = (() => {
+    if (typeof payload === 'string') {
+      return JSON.parse(payload) as unknown;
+    }
+    return payload;
+  })();
+
+  if (Array.isArray(source)) {
+    return source.filter(item => item && typeof item === 'object') as Partial<WorldbookEntryLike>[];
+  }
+  if (source && typeof source === 'object') {
+    const record = source as Record<string, unknown>;
+    if (Array.isArray(record.entries)) {
+      return record.entries.filter(item => item && typeof item === 'object') as Partial<WorldbookEntryLike>[];
+    }
+    if (Array.isArray(record.worldbook)) {
+      return record.worldbook.filter(item => item && typeof item === 'object') as Partial<WorldbookEntryLike>[];
+    }
+  }
+  throw new Error('导入内容必须是世界书条目数组，或包含 entries/worldbook 的对象');
+}
+
+function ensureImportName(entry: Partial<WorldbookEntryLike>, index: number): string {
+  const raw = String(entry.name ?? entry.comment ?? '').trim();
+  return raw.length > 0 ? raw : `导入条目-${index + 1}`;
+}
+
+function makeUniqueName(baseName: string, existing: Set<string>): string {
+  const normalized = normalizeEntryName(baseName);
+  if (!existing.has(normalized)) {
+    existing.add(normalized);
+    return baseName;
+  }
+  for (let i = 2; i <= 9999; i++) {
+    const next = `${baseName} (${i})`;
+    const nextNormalized = normalizeEntryName(next);
+    if (existing.has(nextNormalized)) continue;
+    existing.add(nextNormalized);
+    return next;
+  }
+  throw new Error(`无法为导入条目分配唯一名称: ${baseName}`);
+}
+
+function createActivationPreview(value: unknown): string {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return compactText(text, 120);
 }
 
 const FULL_ENTRY_TEMPLATE: WorldbookEntryLike = {
@@ -197,6 +254,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   let reviewService = new ReviewService(aiClient, parser, logger);
 
   let targetBookName = config.targetBookName;
+  let resolvedBy = 'startup';
+  let fallbackUsed = false;
+  let lastResolveError = '';
   let processing = false;
   let lastObservedFloor = 0;
   let activeChatId = '';
@@ -205,11 +265,19 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   let api: WbmPublicApi;
 
   const backendChats: BackendChatRecord[] = [];
+  const activationLogs: ActivationLogRecord[] = [];
 
   function pushBackendRecord(record: BackendChatRecord): void {
     backendChats.push(record);
     if (backendChats.length > 120) {
       backendChats.splice(0, backendChats.length - 120);
+    }
+  }
+
+  function pushActivationLog(record: ActivationLogRecord): void {
+    activationLogs.push(record);
+    if (activationLogs.length > 400) {
+      activationLogs.splice(0, activationLogs.length - 400);
     }
   }
 
@@ -240,6 +308,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       legacyWorldbook: runtimeHealth.legacyWorldbook,
     },
     contextSource: config.contextMode,
+    resolvedBy,
+    fallbackUsed,
+    lastResolveError: lastResolveError || undefined,
   });
 
   const rebuildScheduler = (currentFloor: number): void => {
@@ -259,13 +330,176 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   };
 
   const resolveBookName = async (preferred?: string): Promise<string> => {
-    if (preferred && preferred.trim()) return preferred.trim();
-    const resolved = await targetResolver.resolve(config.targetType, config.targetBookName);
-    targetBookName = resolved;
-    return resolved;
+    if (preferred && preferred.trim()) {
+      const preferredName = preferred.trim();
+      targetBookName = preferredName;
+      resolvedBy = 'manual_preferred';
+      fallbackUsed = false;
+      lastResolveError = '';
+      return preferredName;
+    }
+    try {
+      const resolved = await targetResolver.resolveDetailed(
+        config.targetType,
+        config.targetBookName,
+        config.managedFallbackPolicy,
+      );
+      targetBookName = resolved.bookName;
+      resolvedBy = resolved.resolvedBy;
+      fallbackUsed = resolved.fallbackUsed;
+      lastResolveError = '';
+      return resolved.bookName;
+    } catch (error) {
+      resolvedBy = 'resolve_error';
+      fallbackUsed = false;
+      lastResolveError = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   };
 
   const collectMessages = (): ChatMessage[] => collectRecentChatMessages(config.reviewDepth, runtime.chat);
+
+  const listWorldbookNames = async (targetType?: TargetType): Promise<string[]> => {
+    const type = targetType ?? config.targetType;
+    const dedup = new Set<string>();
+    const pushName = (value: unknown): void => {
+      if (typeof value !== 'string') return;
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      dedup.add(trimmed);
+    };
+    const pushList = (value: unknown): void => {
+      if (!Array.isArray(value)) return;
+      for (const item of value) pushName(item);
+    };
+
+    if (type === 'charPrimary' || type === 'charAdditional') {
+      if (typeof runtime.worldbook.getCharWorldbookNames === 'function') {
+        let bindings: { primary?: unknown; additional?: unknown } | null = null;
+        try {
+          bindings = runtime.worldbook.getCharWorldbookNames('current');
+        } catch (error) {
+          logger.warn('读取角色绑定世界书失败', error);
+        }
+        pushName(bindings?.primary);
+        pushList(bindings?.additional);
+      }
+      if (type === 'charPrimary') {
+        return Array.from(dedup).slice(0, 1);
+      }
+      return Array.from(dedup);
+    }
+
+    if (type === 'global') {
+      if (typeof runtime.worldbook.getGlobalWorldbookNames === 'function') {
+        pushList(runtime.worldbook.getGlobalWorldbookNames());
+      } else if (typeof runtime.worldbook.getWorldbookNames === 'function') {
+        pushList(runtime.worldbook.getWorldbookNames());
+      }
+      return Array.from(dedup);
+    }
+
+    if (type === 'managed') {
+      if (typeof runtime.worldbook.getChatWorldbookName === 'function') {
+        try {
+          pushName(runtime.worldbook.getChatWorldbookName('current'));
+        } catch (error) {
+          logger.warn('读取聊天托管世界书失败', error);
+        }
+      }
+      if (typeof runtime.worldbook.getWorldbookNames === 'function') {
+        pushList(runtime.worldbook.getWorldbookNames());
+      }
+      return Array.from(dedup);
+    }
+
+    if (typeof runtime.worldbook.getWorldbookNames === 'function') {
+      pushList(runtime.worldbook.getWorldbookNames());
+    }
+    return Array.from(dedup);
+  };
+
+  const exportWorldbook = async (bookName?: string): Promise<string> => {
+    const target = await resolveBookName(bookName);
+    const entries = await repository.getEntries(target);
+    return JSON.stringify(
+      {
+        name: target,
+        exportedAt: new Date().toISOString(),
+        total: entries.length,
+        entries,
+      },
+      null,
+      2,
+    );
+  };
+
+  const importWorldbookRaw = async (
+    bookName: string,
+    payload: unknown,
+    strategy: ImportConflictPolicy = 'overwrite',
+  ): Promise<WorldbookImportResult> => {
+    const target = String(bookName ?? '').trim();
+    if (!target) throw new Error('导入目标世界书名不能为空');
+
+    const incoming = parseImportedEntries(payload).map((entry, index) => ({
+      ...entry,
+      name: ensureImportName(entry, index),
+    }));
+
+    const existing = await repository.getEntries(target).catch(() => [] as WorldbookEntryLike[]);
+    const existingByName = new Set(existing.map(item => normalizeEntryName(getEntryDisplayName(item))));
+
+    let imported = 0;
+    let skipped = 0;
+    let renamed = 0;
+    let nextEntries: WorldbookEntryLike[] = [];
+
+    if (strategy === 'overwrite') {
+      nextEntries = incoming.map(item => ({ ...item })) as WorldbookEntryLike[];
+      imported = incoming.length;
+    } else if (strategy === 'skip_duplicate') {
+      nextEntries = cloneEntryList(existing);
+      for (const item of incoming) {
+        const entryName = ensureImportName(item, imported + skipped);
+        const normalized = normalizeEntryName(entryName);
+        if (existingByName.has(normalized)) {
+          skipped++;
+          continue;
+        }
+        existingByName.add(normalized);
+        nextEntries.push({ ...item, name: entryName });
+        imported++;
+      }
+    } else {
+      nextEntries = cloneEntryList(existing);
+      for (const item of incoming) {
+        const baseName = ensureImportName(item, imported + skipped + renamed);
+        const normalized = normalizeEntryName(baseName);
+        if (!existingByName.has(normalized)) {
+          existingByName.add(normalized);
+          nextEntries.push({ ...item, name: baseName });
+          imported++;
+          continue;
+        }
+        const uniqueName = makeUniqueName(baseName, existingByName);
+        nextEntries.push({ ...item, name: uniqueName });
+        imported++;
+        renamed++;
+      }
+    }
+
+    await repository.replaceEntries(target, nextEntries);
+    logger.info(`世界书导入完成: ${target} strategy=${strategy} imported=${imported} skipped=${skipped} renamed=${renamed}`);
+    panel.refresh();
+    return {
+      bookName: target,
+      strategy,
+      imported,
+      skipped,
+      renamed,
+    };
+  };
 
   const listLockedEntries = (bookName: string): string[] => entryLocks.list(bookName);
 
@@ -492,6 +726,10 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     saveConfig: async next => {
       const normalized = parseConfig(next);
       Object.assign(config, normalized);
+      targetBookName = config.targetBookName;
+      resolvedBy = 'config';
+      fallbackUsed = false;
+      lastResolveError = '';
       saveConfig(config, storage ?? undefined);
 
       // 保持 external 字段与 api 配置的兼容同步
@@ -521,6 +759,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const target = await resolveBookName();
       return await repository.getEntries(target);
     },
+    listWorldbookNames: async targetType => await listWorldbookNames(targetType),
     listAiManagedNames: () => {
       if (!targetBookName) return [];
       return aiRegistry.list(targetBookName).map(item => item.entryName);
@@ -595,6 +834,12 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     },
     rejectAll: async () => {
       await api.rejectQueue();
+    },
+    approveOne: async id => {
+      await api.approveQueue([id]);
+    },
+    rejectOne: async id => {
+      await api.rejectQueue([id]);
     },
     listQueue: () => queue.list(),
     listSnapshots: bookName => snapshots.list(bookName),
@@ -691,6 +936,25 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         2,
       );
     },
+    exportWorldbook: async bookName => await exportWorldbook(bookName),
+    importWorldbookRaw: async (bookName, payload, strategy) =>
+      await importWorldbookRaw(bookName, payload, strategy),
+    listActivationLogs: () => activationLogs.map(item => ({ ...item })),
+    clearActivationLogs: () => {
+      activationLogs.splice(0, activationLogs.length);
+      panel.refresh();
+    },
+    exportActivationLogs: () =>
+      JSON.stringify(
+        {
+          exportedAt: new Date().toISOString(),
+          version,
+          total: activationLogs.length,
+          records: activationLogs,
+        },
+        null,
+        2,
+      ),
     verifyCurrentBook: async () => {
       const bookName = await resolveBookName();
       return await bookSync.verify(bookName);
@@ -981,6 +1245,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     getStatus: () => getStatus(),
 
     getEntries,
+    listWorldbookNames,
+    exportWorldbook,
+    importWorldbookRaw,
     listLockedEntries: bookName => {
       const target = String(bookName ?? targetBookName ?? '').trim();
       if (!target) return [];
@@ -1031,6 +1298,11 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     },
     listBackendChats: () => [...backendChats],
     exportBackendChats: ids => panelBridge.exportBackendChats(ids),
+    listActivationLogs: () => activationLogs.map(item => ({ ...item })),
+    clearActivationLogs: () => {
+      activationLogs.splice(0, activationLogs.length);
+      panel.refresh();
+    },
   };
 
   const eventMessageReceived = getRuntimeEventName(runtime, 'MESSAGE_RECEIVED', 'message_received');
@@ -1048,9 +1320,17 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     'CHARACTER_FIRST_MESSAGE_SELECTED',
     'character_first_message_selected',
   );
+  const eventWorldInfoActivated = getRuntimeEventName(
+    runtime,
+    'WORLD_INFO_ACTIVATED',
+    'world_info_activated',
+  );
 
   const resetRuntimeState = (reason: string): void => {
     targetBookName = config.targetBookName;
+    resolvedBy = 'reset';
+    fallbackUsed = false;
+    lastResolveError = '';
     scheduler.reset(0);
     lastObservedFloor = 0;
     logger.info(reason);
@@ -1103,6 +1383,37 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   });
   events.on(eventCharacterFirstMessageSelected, () => {
     resetRuntimeState('角色首条消息已切换，已重置目标世界书与调度状态');
+  });
+  events.on(eventWorldInfoActivated, (...args) => {
+    const payload = args[0];
+    const items = Array.isArray(payload) ? payload : payload ? [payload] : [];
+    if (items.length === 0) return;
+    const now = new Date().toISOString();
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue;
+      const entry = item as Record<string, unknown>;
+      const uid = String(entry.uid ?? entry.id ?? '');
+      const name = String(entry.comment ?? entry.name ?? '').trim() || '(未命名条目)';
+      const bookName = String(
+        entry.worldbookName ??
+          entry.worldbook_name ??
+          entry.lorebookName ??
+          entry.lorebook_name ??
+          targetBookName ??
+          '',
+      ).trim();
+      const preview = createActivationPreview(entry.content);
+      pushActivationLog({
+        id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        time: now,
+        bookName,
+        uid,
+        name,
+        preview,
+        source: 'world_info_activated',
+      });
+    }
+    panel.refresh();
   });
 
   const legacyShell = buildLegacyShell(api, logger);

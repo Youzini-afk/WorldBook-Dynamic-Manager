@@ -27,9 +27,39 @@
       <section v-if="activeTab === 0" key="pane-worldbook" class="wbm-pane">
         <div class="wbm-row">
           <button class="wbm-btn" @click="refreshEntries">刷新</button>
+          <button class="wbm-btn" @click="refreshWorldbookOptions">刷新可选书</button>
           <button class="wbm-btn" @click="refreshLockedNames">刷新锁定</button>
           <button class="wbm-btn" @click="refreshAiManagedNames">刷新AI标记</button>
           <button class="wbm-btn wbm-btn-primary" @click="manualReview">手动审核</button>
+        </div>
+        <div class="wbm-card">
+          <div class="wbm-row">
+            <label>当前目标世界书</label>
+            <select v-model="selectedWorldbookName">
+              <option value="">（未选择）</option>
+              <option v-for="name in worldbookOptions" :key="name" :value="name">
+                {{ name }}
+              </option>
+            </select>
+            <button class="wbm-btn wbm-btn-mini" @click="applySelectedWorldbook">设为目标</button>
+            <button class="wbm-btn wbm-btn-mini" @click="exportCurrentWorldbook">导出当前</button>
+          </div>
+          <div class="wbm-row">
+            <input v-model="importTargetBookName" placeholder="导入目标世界书（留空使用当前目标）" />
+            <select v-model="importConflictPolicy">
+              <option value="overwrite">覆盖</option>
+              <option value="skip_duplicate">跳过重复</option>
+              <option value="merge_rename">合并并重命名</option>
+            </select>
+            <button class="wbm-btn wbm-btn-primary wbm-btn-mini" @click="triggerImportWorldbook">导入世界书</button>
+            <input
+              ref="importFileInputRef"
+              type="file"
+              accept=".json,application/json"
+              style="display: none"
+              @change="onImportFileChange"
+            />
+          </div>
         </div>
         <div class="wbm-row">
           <span class="wbm-chip">AI托管条目 {{ aiManagedNames.length }}</span>
@@ -280,6 +310,11 @@
           </select>
           <label>目标世界书名</label>
           <input v-model="config.targetBookName" />
+          <label>托管回退策略</label>
+          <select v-model="config.managedFallbackPolicy">
+            <option value="strict">严格（strict）</option>
+            <option value="fallback">允许回退（fallback）</option>
+          </select>
           <label>审核模式</label>
           <select v-model="config.approvalMode">
             <option value="auto">自动执行（auto）</option>
@@ -334,6 +369,9 @@
       <section v-else-if="activeTab === 4" key="pane-status" class="wbm-pane">
         <div class="wbm-card">
           <div>目标世界书: {{ status.targetBookName || '(未解析)' }}</div>
+          <div>目标解析来源: {{ status.resolvedBy || '(无)' }}</div>
+          <div>回退命中: {{ status.fallbackUsed ? '是' : '否' }}</div>
+          <div v-if="status.lastResolveError">最近解析错误: {{ status.lastResolveError }}</div>
           <div>自动审核: {{ status.autoEnabled ? '开启' : '关闭' }}</div>
           <div>处理状态: {{ status.processing ? '处理中' : '空闲' }}</div>
           <div>审核模式: {{ formatApprovalMode(status.approvalMode) }}</div>
@@ -410,7 +448,30 @@
         <div class="wbm-card">
           <strong>审核队列</strong>
           <div v-for="item in queue" :key="item.id" class="wbm-item is-small">
-            {{ item.id }} | floor={{ item.floor ?? '-' }} | {{ item.commands.length }} 条
+            <div class="wbm-row is-spread">
+              <span>{{ item.id }} | floor={{ item.floor ?? '-' }} | {{ item.commands.length }} 条</span>
+              <div class="wbm-row">
+                <button class="wbm-btn wbm-btn-mini" @click="approveOne(item.id)">通过</button>
+                <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="rejectOne(item.id)">拒绝</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="wbm-card">
+          <strong>激活监控（WORLD_INFO_ACTIVATED）</strong>
+          <div class="wbm-row">
+            <button class="wbm-btn wbm-btn-mini" @click="refreshActivationLogs">刷新激活日志</button>
+            <button class="wbm-btn wbm-btn-mini" @click="exportActivationLogs">导出激活日志</button>
+            <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="clearActivationLogs">清空激活日志</button>
+          </div>
+          <div v-if="activationLogs.length === 0" class="wbm-item is-small">暂无激活记录</div>
+          <div v-for="item in activationLogs" :key="item.id" class="wbm-item is-small">
+            <div class="wbm-row is-spread">
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.time }}</span>
+            </div>
+            <div>{{ item.bookName || '(未知世界书)' }} | uid={{ item.uid || '-' }}</div>
+            <div>{{ item.preview || '(空内容)' }}</div>
           </div>
         </div>
         <div class="wbm-card">
@@ -446,9 +507,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type {
+  ActivationLogRecord,
   ApiPreset,
   BackendChatRecord,
   BookSyncResult,
+  ImportConflictPolicy,
   IsolationInfo,
   IsolationStats,
   PromptEntry,
@@ -477,6 +540,8 @@ const status = ref(props.bridge.getStatus());
 const config = reactive<WbmConfig>({ ...props.bridge.getConfig() });
 const apiConfig = reactive<WbmApiConfig>({ ...props.bridge.getApiConfig() });
 const entries = ref<WorldbookEntryLike[]>([]);
+const worldbookOptions = ref<string[]>([]);
+const selectedWorldbookName = ref('');
 const queue = ref(props.bridge.listQueue());
 const snapshots = ref(props.bridge.listSnapshots());
 const logs = ref(props.bridge.getLogs());
@@ -494,11 +559,15 @@ const newPromptPresetName = ref('');
 const backendChats = ref<BackendChatRecord[]>([]);
 const selectedBackendId = ref('');
 const verifyResult = ref<BookSyncResult | null>(null);
+const activationLogs = ref<ActivationLogRecord[]>([]);
 const isolationInfo = ref<IsolationInfo>(props.bridge.getIsolationInfo());
 const isolationStats = ref<IsolationStats>(props.bridge.getIsolationStats());
 
 const newEntryName = ref('');
 const newEntryContent = ref('');
+const importTargetBookName = ref('');
+const importConflictPolicy = ref<ImportConflictPolicy>('overwrite');
+const importFileInputRef = ref<HTMLInputElement | null>(null);
 const rollbackFloorInput = ref<number | null>(null);
 const rollbackChatIdInput = ref('');
 const PANEL_REFRESH_EVENT = 'wbm3:panel-refresh';
@@ -596,6 +665,15 @@ function downloadJsonFile(filename: string, content: string): void {
   window.URL.revokeObjectURL(url);
 }
 
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result ?? ''));
+    reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
+    reader.readAsText(file);
+  });
+}
+
 function setEntryTextField(entry: WorldbookEntryLike, field: string, event: Event): void {
   const next = (event.target as HTMLInputElement).value;
   entry[field] = next;
@@ -645,6 +723,13 @@ async function runData<T>(action: string, runner: () => Promise<T> | T): Promise
 async function refreshStatus(): Promise<void> {
   await runVoid('刷新状态', () => {
     status.value = props.bridge.getStatus();
+    const resolvedTarget = status.value.targetBookName?.trim() ?? '';
+    if (resolvedTarget) {
+      selectedWorldbookName.value = resolvedTarget;
+      if (!importTargetBookName.value) {
+        importTargetBookName.value = resolvedTarget;
+      }
+    }
   });
 }
 
@@ -662,6 +747,24 @@ async function refreshEntries(): Promise<void> {
   await refreshLockedNames();
   await refreshAiManagedNames();
   await refreshStatus();
+}
+
+async function refreshWorldbookOptions(): Promise<void> {
+  const next = await runData('刷新可选世界书', () => props.bridge.listWorldbookNames(config.targetType));
+  if (next == null) return;
+  const selected = config.targetBookName.trim();
+  const dedup = new Set<string>();
+  const normalized = next
+    .map(item => item.trim())
+    .filter(item => item.length > 0)
+    .filter(item => {
+      if (dedup.has(item)) return false;
+      dedup.add(item);
+      return true;
+    });
+  if (selected && !dedup.has(selected)) normalized.unshift(selected);
+  worldbookOptions.value = normalized;
+  selectedWorldbookName.value = selected || normalized[0] || '';
 }
 
 async function refreshAiManagedNames(): Promise<void> {
@@ -734,6 +837,57 @@ async function saveConfig(): Promise<void> {
     await props.bridge.saveConfig({ ...config });
     status.value = props.bridge.getStatus();
   });
+}
+
+async function applySelectedWorldbook(): Promise<void> {
+  const selected = selectedWorldbookName.value.trim();
+  if (!selected) return;
+  const ok = await runVoid('切换目标世界书', async () => {
+    config.targetBookName = selected;
+    await props.bridge.saveConfig({ ...config });
+    status.value = props.bridge.getStatus();
+  });
+  if (!ok) return;
+  await refreshEntries();
+}
+
+async function exportCurrentWorldbook(): Promise<void> {
+  const ok = await runVoid('导出世界书', async () => {
+    const target = selectedWorldbookName.value.trim() || undefined;
+    const payload = await props.bridge.exportWorldbook(target);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const safeName = (target ?? 'worldbook').replace(/[\\/:*?"<>|]/g, '_');
+    downloadJsonFile(`wbm3-worldbook-${safeName}-${stamp}.json`, payload);
+  });
+  if (!ok) return;
+}
+
+function triggerImportWorldbook(): void {
+  importFileInputRef.value?.click();
+}
+
+async function onImportFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const target =
+    importTargetBookName.value.trim() ||
+    selectedWorldbookName.value.trim() ||
+    config.targetBookName.trim();
+  if (!target) {
+    setError('导入世界书', '请先选择目标世界书，或填写导入目标世界书名');
+    return;
+  }
+  const ok = await runVoid('导入世界书', async () => {
+    const raw = await readFileAsText(file);
+    await props.bridge.importWorldbookRaw(target, raw, importConflictPolicy.value);
+  });
+  if (!ok) return;
+  selectedWorldbookName.value = target;
+  config.targetBookName = target;
+  await refreshWorldbookOptions();
+  await refreshEntries();
 }
 
 async function saveApiSettings(): Promise<void> {
@@ -973,9 +1127,25 @@ async function approveAll(): Promise<void> {
   await refreshQueue();
 }
 
+async function approveOne(id: string): Promise<void> {
+  const ok = await runVoid('通过单条队列', async () => {
+    await props.bridge.approveOne(id);
+  });
+  if (!ok) return;
+  await refreshQueue();
+}
+
 async function rejectAll(): Promise<void> {
   const ok = await runVoid('全部拒绝', async () => {
     await props.bridge.rejectAll();
+  });
+  if (!ok) return;
+  await refreshQueue();
+}
+
+async function rejectOne(id: string): Promise<void> {
+  const ok = await runVoid('拒绝单条队列', async () => {
+    await props.bridge.rejectOne(id);
   });
   if (!ok) return;
   await refreshQueue();
@@ -1030,9 +1200,32 @@ async function promoteIsolationToGlobal(): Promise<void> {
   await refreshIsolation();
 }
 
+async function refreshActivationLogs(): Promise<void> {
+  await runVoid('刷新激活日志', () => {
+    activationLogs.value = props.bridge.listActivationLogs();
+  });
+}
+
+async function clearActivationLogs(): Promise<void> {
+  const ok = await runVoid('清空激活日志', () => {
+    props.bridge.clearActivationLogs();
+  });
+  if (!ok) return;
+  await refreshActivationLogs();
+}
+
+async function exportActivationLogs(): Promise<void> {
+  await runVoid('导出激活日志', () => {
+    const raw = props.bridge.exportActivationLogs();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadJsonFile(`wbm3-activation-${stamp}.json`, raw);
+  });
+}
+
 async function refreshForActiveTab(): Promise<void> {
   await refreshStatus();
   if (activeTab.value === 0) {
+    await refreshWorldbookOptions();
     await refreshEntries();
     await refreshLockedNames();
     await refreshAiManagedNames();
@@ -1057,6 +1250,7 @@ async function refreshForActiveTab(): Promise<void> {
     await refreshQueue();
     await refreshSnapshots();
     await refreshIsolation();
+    await refreshActivationLogs();
     return;
   }
   if (activeTab.value === 6) {
@@ -1071,6 +1265,13 @@ function handlePanelRefreshEvent(): void {
 watch(activeTab, () => {
   void refreshForActiveTab();
 });
+
+watch(
+  () => config.targetType,
+  () => {
+    void refreshWorldbookOptions();
+  },
+);
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
@@ -1092,8 +1293,10 @@ onMounted(async () => {
   await refreshPromptEntries();
   await refreshApiPresets();
   await refreshPromptPresets();
+  await refreshWorldbookOptions();
   await refreshBackendChats();
   await refreshIsolation();
+  await refreshActivationLogs();
   await refreshLockedNames();
   await refreshAiManagedNames();
   await refreshStatus();

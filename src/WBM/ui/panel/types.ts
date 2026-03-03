@@ -1,13 +1,17 @@
 import type {
+  ActivationLogRecord,
   ApiPreset,
   BackendChatRecord,
   BookSyncResult,
+  ImportConflictPolicy,
   IsolationInfo,
   IsolationStats,
   PendingReviewItem,
   PromptEntry,
   PromptPreset,
+  TargetType,
   WbmApiConfig,
+  WorldbookImportResult,
   SnapshotRecord,
   WbmConfig,
   WbmStatus,
@@ -20,6 +24,7 @@ export interface PanelBridge {
   getConfig(): WbmConfig;
   saveConfig(next: WbmConfig): Promise<void> | void;
   listEntries(): Promise<WorldbookEntryLike[]>;
+  listWorldbookNames(targetType?: TargetType): Promise<string[]>;
   listAiManagedNames(): string[];
   listLockedNames(): string[];
   setEntryLocked(uid: number | string, locked: boolean): Promise<void>;
@@ -31,6 +36,8 @@ export interface PanelBridge {
   manualReview(): Promise<void>;
   approveAll(): Promise<void>;
   rejectAll(): Promise<void>;
+  approveOne(id: string): Promise<void>;
+  rejectOne(id: string): Promise<void>;
   listQueue(): PendingReviewItem[];
   listSnapshots(bookName?: string): SnapshotRecord[];
   rollback(snapshotId: string): Promise<void>;
@@ -49,6 +56,15 @@ export interface PanelBridge {
   deletePromptPreset(id: string): Promise<void> | void;
   listBackendChats(): BackendChatRecord[];
   exportBackendChats(ids?: string[]): string;
+  exportWorldbook(bookName?: string): Promise<string>;
+  importWorldbookRaw(
+    bookName: string,
+    payload: unknown,
+    strategy?: ImportConflictPolicy,
+  ): Promise<WorldbookImportResult>;
+  listActivationLogs(): ActivationLogRecord[];
+  clearActivationLogs(): void;
+  exportActivationLogs(): string;
   verifyCurrentBook(): Promise<BookSyncResult>;
   getIsolationInfo(): IsolationInfo;
   getIsolationStats(): IsolationStats;

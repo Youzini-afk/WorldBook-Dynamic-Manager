@@ -1,4 +1,4 @@
-import type { LoggerLike, TargetType } from '../../core/types';
+import type { LoggerLike, ManagedFallbackPolicy, TargetType } from '../../core/types';
 import type { RuntimeWorldbookApi } from '../../infra/runtime/types';
 
 function normalizeBookName(value: unknown): string | null {
@@ -19,13 +19,32 @@ type CharBindings = {
   additional: string[];
 };
 
+export interface ResolveBookResult {
+  bookName: string;
+  resolvedBy: string;
+  fallbackUsed: boolean;
+}
+
 export class TargetBookResolver {
   constructor(
     private readonly logger: LoggerLike,
     private readonly api: RuntimeWorldbookApi,
   ) {}
 
-  async resolve(targetType: TargetType, targetBookName: string): Promise<string> {
+  async resolve(
+    targetType: TargetType,
+    targetBookName: string,
+    managedFallbackPolicy: ManagedFallbackPolicy = 'strict',
+  ): Promise<string> {
+    const resolved = await this.resolveDetailed(targetType, targetBookName, managedFallbackPolicy);
+    return resolved.bookName;
+  }
+
+  async resolveDetailed(
+    targetType: TargetType,
+    targetBookName: string,
+    managedFallbackPolicy: ManagedFallbackPolicy = 'strict',
+  ): Promise<ResolveBookResult> {
     const preferred = targetBookName.trim();
 
     if (targetType === 'charPrimary') {
@@ -39,7 +58,11 @@ export class TargetBookResolver {
       if (!bindings.primary) {
         throw new Error('当前角色未绑定主世界书');
       }
-      return bindings.primary;
+      return {
+        bookName: bindings.primary,
+        resolvedBy: 'char_primary',
+        fallbackUsed: false,
+      };
     }
 
     if (targetType === 'charAdditional') {
@@ -58,9 +81,17 @@ export class TargetBookResolver {
         if (!matched) {
           throw new Error(`当前角色未绑定指定附加世界书: ${preferred}`);
         }
-        return matched;
+        return {
+          bookName: matched,
+          resolvedBy: 'char_additional',
+          fallbackUsed: false,
+        };
       }
-      return bindings.additional[0];
+      return {
+        bookName: bindings.additional[0],
+        resolvedBy: 'char_additional',
+        fallbackUsed: false,
+      };
     }
 
     if (targetType === 'global') {
@@ -71,21 +102,33 @@ export class TargetBookResolver {
           if (!names.includes(name)) {
             throw new Error(`未找到全局世界书: ${name}`);
           }
-          return name;
+          return {
+            bookName: name,
+            resolvedBy: 'global',
+            fallbackUsed: false,
+          };
         }
         if (names.length === 0) throw new Error('未找到可用全局世界书');
-        return names[0];
+        return {
+          bookName: names[0],
+          resolvedBy: 'global',
+          fallbackUsed: false,
+        };
       }
 
       if (preferred) {
         this.logger.warn('全局世界书查询接口不可用，使用配置中的目标世界书名');
-        return preferred;
+        return {
+          bookName: preferred,
+          resolvedBy: 'global_preferred',
+          fallbackUsed: false,
+        };
       }
 
       throw new Error('全局世界书查询接口不可用，且未配置目标世界书名');
     }
 
-    return this.resolveManaged(preferred);
+    return this.resolveManaged(preferred, managedFallbackPolicy);
   }
 
   private async hasCurrentCharacter(): Promise<boolean> {
@@ -162,11 +205,20 @@ export class TargetBookResolver {
     }
   }
 
-  private async resolveManaged(targetBookName: string): Promise<string> {
+  private async resolveManaged(
+    targetBookName: string,
+    managedFallbackPolicy: ManagedFallbackPolicy,
+  ): Promise<ResolveBookResult> {
     const preferred = targetBookName || undefined;
 
     const existing = this.tryGetChatWorldbookName();
-    if (existing) return existing;
+    if (existing) {
+      return {
+        bookName: existing,
+        resolvedBy: 'managed_chat_binding',
+        fallbackUsed: false,
+      };
+    }
     const hasCharacter = await this.hasCurrentCharacter();
 
     if (typeof this.api.getOrCreateChatWorldbook === 'function') {
@@ -198,12 +250,27 @@ export class TargetBookResolver {
       } else {
         this.logger.warn('托管模式创建成功，但聊天绑定接口不可用');
       }
-      return created;
+      return {
+        bookName: created,
+        resolvedBy: 'managed_create_or_get',
+        fallbackUsed: false,
+      };
     }
 
     if (preferred) {
       this.logger.warn('托管模式接口不可用，使用配置中的目标世界书名');
-      return preferred;
+      return {
+        bookName: preferred,
+        resolvedBy: 'managed_preferred',
+        fallbackUsed: false,
+      };
+    }
+
+    if (managedFallbackPolicy === 'strict') {
+      if (!hasCharacter) {
+        throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
+      }
+      throw new Error('托管模式接口不可用，且 strict 策略禁止回退世界书');
     }
 
     if (!hasCharacter) {
@@ -213,11 +280,19 @@ export class TargetBookResolver {
     const bindings = this.tryGetCharBindings();
     if (bindings?.primary) {
       this.logger.warn('托管模式接口不可用，已回退到角色主世界书');
-      return bindings.primary;
+      return {
+        bookName: bindings.primary,
+        resolvedBy: 'fallback_char_primary',
+        fallbackUsed: true,
+      };
     }
     if (bindings?.additional.length) {
       this.logger.warn('托管模式接口不可用，已回退到角色附加世界书');
-      return bindings.additional[0];
+      return {
+        bookName: bindings.additional[0],
+        resolvedBy: 'fallback_char_additional',
+        fallbackUsed: true,
+      };
     }
 
     throw new Error('当前角色未绑定可用世界书，且托管模式接口不可用');
