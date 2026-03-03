@@ -60,6 +60,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
     retries: 1,
   };
   let entries: WorldbookEntryLike[] = [{ uid: 1, name: '条目A', content: '内容A', enabled: true }];
+  let globalBindings: string[] = [];
   let config = makeConfig();
   let status = makeStatus();
   let promptEntries: PromptEntry[] = [];
@@ -111,6 +112,19 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
     }),
     listEntries: vi.fn(async () => entries.map(item => ({ ...item }))),
     listWorldbookNames: vi.fn(async () => ['book-A']),
+    getGlobalBindings: vi.fn(() => [...globalBindings]),
+    setGlobalBindings: vi.fn(async (names: string[]) => {
+      const dedup = new Set<string>();
+      const normalized: string[] = [];
+      for (const name of names) {
+        const value = String(name).trim();
+        if (!value || dedup.has(value)) continue;
+        dedup.add(value);
+        normalized.push(value);
+      }
+      globalBindings = normalized;
+      return [...globalBindings];
+    }),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     listLockedNames: vi.fn(() => [...lockedNames]),
     setEntryLocked: vi.fn(async (uid: number | string, locked: boolean) => {
@@ -318,6 +332,27 @@ describe('WbmPanel UI', () => {
     await clickButton(wrapper, '执行替换');
 
     expect(bridge.updateEntry).toHaveBeenCalledWith(expect.objectContaining({ content: '内容B' }));
+  });
+
+  it('全局绑定工具可添加并移除世界书', async () => {
+    const bridge = makeBridge({
+      listWorldbookNames: vi.fn(async () => ['book-A', 'book-B']),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    const globalSelect = wrapper
+      .findAll('select')
+      .find(item => item.text().includes('选择加入全局的世界书'));
+    expect(globalSelect).toBeDefined();
+    await globalSelect!.setValue('book-B');
+    await clickButton(wrapper, '加入全局');
+
+    expect(bridge.setGlobalBindings).toHaveBeenCalledWith(['book-B']);
+    expect(wrapper.text()).toContain('book-B');
+
+    await clickButton(wrapper, '移除');
+    expect(bridge.setGlobalBindings).toHaveBeenLastCalledWith([]);
   });
 
   it('提示词/API/调度标签可保存配置', async () => {

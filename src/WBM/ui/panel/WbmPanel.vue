@@ -60,6 +60,28 @@
               @change="onImportFileChange"
             />
           </div>
+          <div class="wbm-row">
+            <select v-model="globalBindingCandidate">
+              <option value="">选择加入全局的世界书</option>
+              <option v-for="name in globalBindingCandidates" :key="`global-candidate-${name}`" :value="name">
+                {{ name }}
+              </option>
+            </select>
+            <button class="wbm-btn wbm-btn-mini" @click="refreshGlobalBindings">刷新全局绑定</button>
+            <button class="wbm-btn wbm-btn-mini" @click="addGlobalBinding">加入全局</button>
+            <button class="wbm-btn wbm-btn-mini" @click="addCurrentTargetToGlobal">加入当前目标</button>
+            <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="clearGlobalBindings">清空全局</button>
+          </div>
+          <div class="wbm-row">
+            <span class="wbm-chip">全局常驻 {{ globalBindings.length }}</span>
+          </div>
+          <div v-if="globalBindings.length === 0" class="wbm-item is-small">暂无全局常驻世界书</div>
+          <div v-for="name in globalBindings" :key="`global-binding-${name}`" class="wbm-item is-small">
+            <div class="wbm-row is-spread">
+              <span>{{ name }}</span>
+              <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="removeGlobalBinding(name)">移除</button>
+            </div>
+          </div>
         </div>
         <div class="wbm-card">
           <strong>查找替换工具</strong>
@@ -673,6 +695,8 @@ const apiConfig = reactive<WbmApiConfig>({ ...props.bridge.getApiConfig() });
 const entries = ref<WorldbookEntryLike[]>([]);
 const worldbookOptions = ref<string[]>([]);
 const selectedWorldbookName = ref('');
+const globalBindings = ref<string[]>([]);
+const globalBindingCandidate = ref('');
 const queue = ref(props.bridge.listQueue());
 const snapshots = ref(props.bridge.listSnapshots());
 const logs = ref(props.bridge.getLogs());
@@ -808,6 +832,11 @@ const entryDiffText = computed(() => {
   return buildSimpleLineDiff(normalizeEntryForDiff(left.entry), normalizeEntryForDiff(right.entry));
 });
 
+const globalBindingCandidates = computed(() => {
+  const existing = new Set(globalBindings.value.map(item => item.trim()));
+  return worldbookOptions.value.filter(name => !existing.has(name.trim()));
+});
+
 function formatApprovalMode(value: string): string {
   if (value === 'auto') return '自动执行（auto）';
   if (value === 'manual') return '手动审核（manual）';
@@ -824,6 +853,18 @@ function asText(value: unknown): string {
   if (Array.isArray(value)) return value.map(item => String(item)).join(',');
   if (value == null) return '';
   return String(value);
+}
+
+function normalizeNameList(value: string[]): string[] {
+  const dedup = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of value) {
+    const name = item.trim();
+    if (!name || dedup.has(name)) continue;
+    dedup.add(name);
+    normalized.push(name);
+  }
+  return normalized;
 }
 
 function isAiManaged(entry: WorldbookEntryLike): boolean {
@@ -1118,6 +1159,15 @@ async function refreshWorldbookOptions(): Promise<void> {
   selectedWorldbookName.value = selected || normalized[0] || '';
 }
 
+async function refreshGlobalBindings(): Promise<void> {
+  const next = await runData('刷新全局绑定', () => props.bridge.getGlobalBindings());
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+  if (globalBindingCandidate.value && !globalBindingCandidates.value.includes(globalBindingCandidate.value)) {
+    globalBindingCandidate.value = '';
+  }
+}
+
 async function refreshAiManagedNames(): Promise<void> {
   const next = await runData('刷新 AI 托管标记', () => props.bridge.listAiManagedNames());
   if (next == null) return;
@@ -1200,6 +1250,55 @@ async function applySelectedWorldbook(): Promise<void> {
   });
   if (!ok) return;
   await refreshEntries();
+}
+
+async function addGlobalBinding(): Promise<void> {
+  const name = globalBindingCandidate.value.trim();
+  if (!name) {
+    setError('加入全局', '请先选择一个世界书');
+    return;
+  }
+  if (globalBindings.value.includes(name)) return;
+  const next = await runData('加入全局', async () =>
+    await props.bridge.setGlobalBindings([...globalBindings.value, name]),
+  );
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+  globalBindingCandidate.value = '';
+}
+
+async function addCurrentTargetToGlobal(): Promise<void> {
+  const name = selectedWorldbookName.value.trim() || config.targetBookName.trim();
+  if (!name) {
+    setError('加入当前目标到全局', '当前没有可用目标世界书');
+    return;
+  }
+  if (globalBindings.value.includes(name)) return;
+  const next = await runData('加入当前目标到全局', async () =>
+    await props.bridge.setGlobalBindings([...globalBindings.value, name]),
+  );
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+}
+
+async function removeGlobalBinding(name: string): Promise<void> {
+  const target = name.trim();
+  if (!target) return;
+  const next = await runData('移除全局绑定', async () =>
+    await props.bridge.setGlobalBindings(globalBindings.value.filter(item => item !== target)),
+  );
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+  if (globalBindingCandidate.value === target) {
+    globalBindingCandidate.value = '';
+  }
+}
+
+async function clearGlobalBindings(): Promise<void> {
+  const next = await runData('清空全局绑定', async () => await props.bridge.setGlobalBindings([]));
+  if (next == null) return;
+  globalBindings.value = normalizeNameList(next);
+  globalBindingCandidate.value = '';
 }
 
 async function exportCurrentWorldbook(): Promise<void> {
@@ -1768,6 +1867,7 @@ async function refreshForActiveTab(): Promise<void> {
   await refreshStatus();
   if (activeTab.value === 0) {
     await refreshWorldbookOptions();
+    await refreshGlobalBindings();
     await refreshEntries();
     await refreshLockedNames();
     await refreshAiManagedNames();
@@ -1812,6 +1912,7 @@ watch(
   () => config.targetType,
   () => {
     void refreshWorldbookOptions();
+    void refreshGlobalBindings();
   },
 );
 
@@ -1871,6 +1972,7 @@ onMounted(async () => {
   await refreshApiPresets();
   await refreshPromptPresets();
   await refreshWorldbookOptions();
+  await refreshGlobalBindings();
   await refreshBackendChats();
   await refreshIsolation();
   await refreshActivationLogs();

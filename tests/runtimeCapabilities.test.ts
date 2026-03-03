@@ -12,6 +12,7 @@ describe('runtime capabilities', () => {
       createWorldbookEntries: vi.fn(),
       updateWorldbookWith: vi.fn(),
       deleteWorldbookEntries: vi.fn(),
+      rebindGlobalWorldbooks: vi.fn(),
       eventOn: vi.fn(),
       document: {},
       tavern_events: {
@@ -24,6 +25,7 @@ describe('runtime capabilities', () => {
     expect(health.highLevelWorldbook).toBe(true);
     expect(health.eventSourceAvailable).toBe(true);
     expect(health.mountAvailable).toBe(true);
+    expect(typeof runtime.worldbook.rebindGlobalWorldbooks).toBe('function');
     expect(getRuntimeEventName(runtime, 'MESSAGE_RECEIVED', 'message_received')).toBe('msg_recv');
   });
 

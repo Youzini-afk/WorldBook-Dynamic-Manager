@@ -109,6 +109,20 @@ function normalizeEntryName(input: string): string {
   return input.trim().toLowerCase();
 }
 
+function normalizeWorldbookNames(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  const dedup = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of input) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim();
+    if (!name || dedup.has(name)) continue;
+    dedup.add(name);
+    normalized.push(name);
+  }
+  return normalized;
+}
+
 function cloneEntryList(entries: WorldbookEntryLike[]): WorldbookEntryLike[] {
   return entries.map(entry => ({ ...entry }));
 }
@@ -417,6 +431,43 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       pushList(runtime.worldbook.getWorldbookNames());
     }
     return Array.from(dedup);
+  };
+
+  const getGlobalWorldbooks = (): string[] => {
+    if (typeof runtime.worldbook.getGlobalWorldbookNames !== 'function') return [];
+    try {
+      return normalizeWorldbookNames(runtime.worldbook.getGlobalWorldbookNames());
+    } catch (error) {
+      logger.warn('读取全局世界书失败', error);
+      return [];
+    }
+  };
+
+  const setGlobalWorldbooks = async (names: string[]): Promise<string[]> => {
+    if (typeof runtime.worldbook.rebindGlobalWorldbooks !== 'function') {
+      throw new Error('宿主不支持全局世界书绑定写入接口');
+    }
+
+    const normalized = normalizeWorldbookNames(names);
+    let next = normalized;
+
+    if (typeof runtime.worldbook.getWorldbookNames === 'function') {
+      try {
+        const available = new Set(normalizeWorldbookNames(runtime.worldbook.getWorldbookNames()));
+        next = normalized.filter(name => available.has(name));
+        const dropped = normalized.length - next.length;
+        if (dropped > 0) {
+          logger.warn(`全局世界书写入时已忽略不存在的书: ${dropped} 本`);
+        }
+      } catch (error) {
+        logger.warn('读取可用世界书列表失败，已跳过存在性校验', error);
+      }
+    }
+
+    await runtime.worldbook.rebindGlobalWorldbooks(next);
+    logger.info(`已更新全局世界书绑定: ${next.length} 本`);
+    panel.refresh();
+    return getGlobalWorldbooks();
   };
 
   const exportWorldbook = async (bookName?: string): Promise<string> => {
@@ -760,6 +811,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       return await repository.getEntries(target);
     },
     listWorldbookNames: async targetType => await listWorldbookNames(targetType),
+    getGlobalBindings: () => getGlobalWorldbooks(),
+    setGlobalBindings: async names => await setGlobalWorldbooks(names),
     listAiManagedNames: () => {
       if (!targetBookName) return [];
       return aiRegistry.list(targetBookName).map(item => item.entryName);
@@ -1246,6 +1299,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
     getEntries,
     listWorldbookNames,
+    getGlobalWorldbooks,
+    setGlobalWorldbooks,
     exportWorldbook,
     importWorldbookRaw,
     listLockedEntries: bookName => {

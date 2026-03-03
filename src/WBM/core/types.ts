@@ -311,6 +311,8 @@ export interface WbmPublicApi {
 
   getEntries(bookName?: string): Promise<WorldbookEntryLike[]>;
   listWorldbookNames(targetType?: TargetType): Promise<string[]>;
+  getGlobalWorldbooks(): string[];
+  setGlobalWorldbooks(names: string[]): Promise<string[]>;
   exportWorldbook(bookName?: string): Promise<string>;
   importWorldbookRaw(
     bookName: string,

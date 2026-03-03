@@ -36,6 +36,7 @@ export interface RuntimeWorldbookApi {
 
   getCharWorldbookNames?: (character_name: 'current' | string) => { primary: string | null; additional: string[] };
   getGlobalWorldbookNames?: () => string[];
+  rebindGlobalWorldbooks?: (worldbook_names: string[]) => Promise<void>;
   getWorldbookNames?: () => string[];
   getChatWorldbookName?: (chat_name: 'current') => string | null;
   getOrCreateChatWorldbook?: (chat_name: 'current', worldbook_name?: string) => Promise<string>;
