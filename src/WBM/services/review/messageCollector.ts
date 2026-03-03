@@ -1,19 +1,5 @@
 import type { ChatMessage } from './reviewService';
-
-interface RuntimeChatMessage {
-  role: 'system' | 'assistant' | 'user' | string;
-  message?: string;
-  content?: string;
-  is_hidden?: boolean;
-}
-
-interface RuntimeApi {
-  getChatMessages?: (range: string | number, options?: Record<string, unknown>) => RuntimeChatMessage[];
-}
-
-function runtimeApi(): RuntimeApi {
-  return globalThis as RuntimeApi;
-}
+import type { RuntimeChatApi, RuntimeChatMessage } from '../../infra/runtime/types';
 
 function normalizeMessage(input: RuntimeChatMessage): ChatMessage | null {
   const role = input.role;
@@ -23,8 +9,7 @@ function normalizeMessage(input: RuntimeChatMessage): ChatMessage | null {
   return { role, content };
 }
 
-export function collectRecentChatMessages(reviewDepth: number): ChatMessage[] {
-  const api = runtimeApi();
+export function collectRecentChatMessages(reviewDepth: number, api: RuntimeChatApi): ChatMessage[] {
   if (typeof api.getChatMessages !== 'function') return [];
 
   const depth = Number.isFinite(reviewDepth) ? Math.max(1, Math.floor(reviewDepth)) : 10;

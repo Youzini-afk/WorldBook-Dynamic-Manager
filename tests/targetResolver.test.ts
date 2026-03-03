@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { RuntimeWorldbookApi } from '../src/WBM/infra/runtime/types';
 import { TargetBookResolver } from '../src/WBM/services/worldbook/targetResolver';
 import { noopLogger } from './helpers';
 
@@ -23,28 +24,28 @@ describe('TargetBookResolver', () => {
   it('charPrimary 返回当前角色主书', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书A', additional: ['附加1'] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charPrimary', '')).resolves.toBe('主书A');
   });
 
   it('charPrimary 无主书时抛错', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: [] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未绑定主世界书');
   });
 
   it('charAdditional 在未指定时取第一个附加书', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书A', additional: ['附加1', '附加2'] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charAdditional', '')).resolves.toBe('附加1');
   });
 
   it('global 模式会验证名称存在性', async () => {
     const g = globalThis as MutableGlobal;
     g.getGlobalWorldbookNames = vi.fn().mockReturnValue(['全球A']);
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('global', '全球A')).resolves.toBe('全球A');
     await expect(resolver.resolve('global', '不存在')).rejects.toThrow('未找到全局世界书');
   });
@@ -55,7 +56,7 @@ describe('TargetBookResolver', () => {
       throw new Error('未找到当前打开的角色卡');
     });
     g.getChatWorldbookName = vi.fn().mockReturnValue('聊天绑定书');
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charPrimary', '')).resolves.toBe('聊天绑定书');
   });
 
@@ -65,7 +66,7 @@ describe('TargetBookResolver', () => {
       throw new Error('未找到当前打开的角色卡');
     });
     g.getWorldbookNames = vi.fn().mockReturnValue(['候选书A', '候选书B']);
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charPrimary', '')).resolves.toBe('候选书A');
   });
 
@@ -74,7 +75,7 @@ describe('TargetBookResolver', () => {
     g.getCharWorldbookNames = vi.fn().mockImplementation(() => {
       throw new Error('未找到当前打开的角色卡');
     });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charPrimary', ' 手动指定书名 ')).resolves.toBe('手动指定书名');
   });
 
@@ -86,7 +87,7 @@ describe('TargetBookResolver', () => {
     g.getChatWorldbookName = getChatWorldbookName;
     g.getOrCreateChatWorldbook = getOrCreateChatWorldbook;
     g.rebindChatWorldbook = rebindChatWorldbook;
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).resolves.toBe('聊天托管书');
     expect(rebindChatWorldbook).toHaveBeenCalledWith('current', '聊天托管书');
   });
@@ -97,53 +98,53 @@ describe('TargetBookResolver', () => {
     const getOrCreateChatWorldbook = vi.fn();
     g.getChatWorldbookName = getChatWorldbookName;
     g.getOrCreateChatWorldbook = getOrCreateChatWorldbook;
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).resolves.toBe('已绑定');
     expect(getOrCreateChatWorldbook).not.toHaveBeenCalled();
   });
 
   it('global 接口缺失但有指定名称时直接返回指定值', async () => {
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
     await expect(resolver.resolve('global', '全局直连')).resolves.toBe('全局直连');
   });
 
   it('global 接口缺失时可回退到可用世界书', async () => {
     const g = globalThis as MutableGlobal;
     g.getWorldbookNames = vi.fn().mockReturnValue(['回退全局A']);
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('global', '')).resolves.toBe('回退全局A');
   });
 
   it('managed 接口缺失但有指定名称时直接返回指定值', async () => {
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '托管直连')).resolves.toBe('托管直连');
   });
 
   it('managed 接口缺失时回退到角色主世界书', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '角色主书', additional: [] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).resolves.toBe('角色主书');
   });
 
   it('managed 接口缺失时回退到角色附加世界书', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: ['角色附加书'] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).resolves.toBe('角色附加书');
   });
 
   it('managed 接口缺失时回退到可用世界书', async () => {
     const g = globalThis as MutableGlobal;
     g.getWorldbookNames = vi.fn().mockReturnValue(['可用回退书']);
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).resolves.toBe('可用回退书');
   });
 
   it('managed 无任何可用回退时抛错', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: [] });
-    const resolver = new TargetBookResolver(noopLogger);
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('managed', '')).rejects.toThrow('托管模式接口不可用');
   });
 });

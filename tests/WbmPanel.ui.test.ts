@@ -41,6 +41,9 @@ function makeStatus(): WbmStatus {
     queueSize: 1,
     nextDueFloor: 12,
     targetBookName: 'book-A',
+    backendAvailable: true,
+    eventSourceAvailable: true,
+    mountAvailable: true,
   };
 }
 

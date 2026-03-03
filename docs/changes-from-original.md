@@ -14,7 +14,9 @@
 当前：
 
 1. 新增 `src/WBM` 模块化目录，按 `core/services/infra/ui` 分层。
-2. 入口 `src/WBM/index.ts` 仅负责装配依赖与生命周期，不承载大段业务细节。
+2. 新增 `src/WBM/bootstrap`，拆分为装配根、运行时会话、兼容壳三层。
+3. 新增 `src/WBM/infra/runtime`，统一 runtime 能力探测与健康诊断。
+4. 入口 `src/WBM/index.ts` 仅负责启动/卸载，不承载大段业务细节。
 3. 根 `index.js` 变为构建产物同步文件，不再手工维护业务实现。
 
 ### 1.2 工程化链路
@@ -25,6 +27,7 @@
 2. Webpack 构建（支持 `.vue`）。
 3. ESLint + Prettier。
 4. Vitest + 覆盖率门槛。
+5. CI 拆分为 `lint/typecheck/test/build` 独立作业，Node 20/22 双版本矩阵。
 
 ## 2. 功能层改动
 
@@ -66,6 +69,7 @@
 6. `listQueue`
 7. `listSnapshots`
 8. `getStatus`
+9. 诊断字段：`backendAvailable`、`eventSourceAvailable`、`mountAvailable`
 
 ### 3.2 兼容壳：`window.WBM` / `window.WorldBookManager`
 
@@ -86,7 +90,8 @@
    1. `dist/wbm3.js`（模块化）。
    2. `dist/index.js`（单文件）。
 2. `npm run build:release` 会自动同步 `dist/index.js -> index.js`。
-3. 回滚策略：保留 `v2.1` 与 `v3.0` 独立发布线。
+3. 新增 `npm run smoke:dist`，用于产物可读、语法与导入包脚本 dry-run 冒烟。
+4. 回滚策略：保留 `v2.1` 与 `v3.0` 独立发布线。
 
 ## 6. 测试与质量改动
 

@@ -30,6 +30,7 @@
     "forceConsistentCasingInFileNames": true
   },
   "include": [
+    "global.d.ts",
     "src/**/*.ts",
     "src/**/*.d.ts",
     "src/**/*.vue",

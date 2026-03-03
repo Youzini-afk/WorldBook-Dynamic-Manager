@@ -10,14 +10,16 @@
    2. `npm run lint`
    3. `npm run test`
 3. 本地调试构建：`npm run build:dev` 或 `npm run watch`
+4. 构建冒烟：`npm run build && npm run smoke:dist`
 
 ## 2. 目录职责（必须遵守）
 
 1. `src/WBM/core`：类型、配置 schema 与存储键。
 2. `src/WBM/services`：业务服务层（parser/patch/router/scheduler/review/worldbook）。
-3. `src/WBM/infra`：事件、日志、生命周期基础设施。
+3. `src/WBM/infra`：事件、日志、runtime 能力探测与宿主适配层。
 4. `src/WBM/ui`：面板与 UI 桥接，不写核心业务算法。
-5. `src/WBM/index.ts`：装配根（依赖注入、生命周期接入、API 暴露）。
+5. `src/WBM/bootstrap`：装配根（依赖注入、生命周期接入、API 暴露、兼容壳）。
+6. `src/WBM/index.ts`：轻量入口（启动/卸载调度，不承载业务流程）。
 
 约束：
 
@@ -61,6 +63,7 @@
 2. `npm run lint`
 3. `npm run test`
 4. `npm run build`
+5. `npm run smoke:dist`
 
 发布前强制：
 
@@ -105,4 +108,3 @@
 3. 兼容壳是否仍可运行且有告警。
 4. 覆盖率阈值是否满足。
 5. 单文件产物是否已由 `build:release` 同步。
-

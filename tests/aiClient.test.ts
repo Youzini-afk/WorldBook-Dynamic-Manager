@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { RuntimeReviewApi } from '../src/WBM/infra/runtime/types';
 import { ExternalAiClient, TavernAiClient } from '../src/WBM/services/review/aiClient';
 import { noopLogger } from './helpers';
 
@@ -15,13 +16,13 @@ describe('AiClient', () => {
   it('TavernAiClient 在主 API 可用时返回文本', async () => {
     const g = globalThis as MutableGlobal;
     g.generateRaw = vi.fn().mockResolvedValue('  <world_update>[]</world_update>  ');
-    const client = new TavernAiClient(noopLogger);
+    const client = new TavernAiClient(noopLogger, g as RuntimeReviewApi);
     const output = await client.call([{ role: 'user', content: 'hi' }]);
     expect(output).toBe('<world_update>[]</world_update>');
   });
 
   it('TavernAiClient 在主 API 不可用时返回空', async () => {
-    const client = new TavernAiClient(noopLogger);
+    const client = new TavernAiClient(noopLogger, {} satisfies RuntimeReviewApi);
     const output = await client.call([{ role: 'user', content: 'hi' }]);
     expect(output).toBe('');
   });
@@ -39,6 +40,7 @@ describe('AiClient', () => {
       apiKey: 'key',
       model: 'model-a',
       timeoutMs: 1_000,
+      fetchFn: g.fetch as typeof fetch,
     });
     const output = await client.call([{ role: 'user', content: 'hi' }]);
     expect(output).toBe('<world_update>[]</world_update>');

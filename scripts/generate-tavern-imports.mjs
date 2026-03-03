@@ -2,6 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
+const dryRun = process.argv.includes('--dry-run');
+
 function createScriptImport({ id, name, content, info }) {
   return {
     name,
@@ -19,6 +21,10 @@ function createScriptImport({ id, name, content, info }) {
 }
 
 async function writeJson(filePath, payload) {
+  if (dryRun) {
+    console.log(`[generate-tavern-imports] dry-run: skip write ${filePath}`);
+    return;
+  }
   await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf8');
   console.log(`[generate-tavern-imports] wrote ${filePath}`);
 }

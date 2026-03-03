@@ -1,17 +1,5 @@
 import type { LoggerLike, TargetType } from '../../core/types';
-
-type RuntimeApi = {
-  getCharWorldbookNames?: (character_name: 'current' | string) => { primary: string | null; additional: string[] };
-  getGlobalWorldbookNames?: () => string[];
-  getWorldbookNames?: () => string[];
-  getChatWorldbookName?: (chat_name: 'current') => string | null;
-  getOrCreateChatWorldbook?: (chat_name: 'current', worldbook_name?: string) => Promise<string>;
-  rebindChatWorldbook?: (chat_name: 'current', worldbook_name: string) => Promise<void>;
-};
-
-function runtimeApi(): RuntimeApi {
-  return globalThis as RuntimeApi;
-}
+import type { RuntimeWorldbookApi } from '../../infra/runtime/types';
 
 function normalizeBookName(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -32,7 +20,10 @@ type CharBindings = {
 };
 
 export class TargetBookResolver {
-  constructor(private readonly logger: LoggerLike) {}
+  constructor(
+    private readonly logger: LoggerLike,
+    private readonly api: RuntimeWorldbookApi,
+  ) {}
 
   async resolve(targetType: TargetType, targetBookName: string): Promise<string> {
     const preferred = targetBookName.trim();
@@ -40,7 +31,6 @@ export class TargetBookResolver {
       return preferred;
     }
 
-    const api = runtimeApi();
     if (targetType === 'charPrimary') {
       const bindings = this.tryGetCharBindings();
       if (bindings?.primary) return bindings.primary;
@@ -91,8 +81,8 @@ export class TargetBookResolver {
     }
 
     if (targetType === 'global') {
-      if (typeof api.getGlobalWorldbookNames === 'function') {
-        const names = normalizeBookList(api.getGlobalWorldbookNames());
+      if (typeof this.api.getGlobalWorldbookNames === 'function') {
+        const names = normalizeBookList(this.api.getGlobalWorldbookNames());
         if (preferred) {
           const name = preferred;
           if (!names.includes(name)) {
@@ -122,10 +112,9 @@ export class TargetBookResolver {
   }
 
   private tryGetCharBindings(): CharBindings | null {
-    const api = runtimeApi();
-    if (typeof api.getCharWorldbookNames !== 'function') return null;
+    if (typeof this.api.getCharWorldbookNames !== 'function') return null;
     try {
-      const raw = api.getCharWorldbookNames('current');
+      const raw = this.api.getCharWorldbookNames('current');
       return {
         primary: normalizeBookName(raw?.primary),
         additional: normalizeBookList(raw?.additional),
@@ -137,10 +126,9 @@ export class TargetBookResolver {
   }
 
   private tryGetChatWorldbookName(): string | null {
-    const api = runtimeApi();
-    if (typeof api.getChatWorldbookName !== 'function') return null;
+    if (typeof this.api.getChatWorldbookName !== 'function') return null;
     try {
-      return normalizeBookName(api.getChatWorldbookName('current'));
+      return normalizeBookName(this.api.getChatWorldbookName('current'));
     } catch (error) {
       this.logger.warn('读取当前聊天绑定世界书失败', error);
       return null;
@@ -148,19 +136,18 @@ export class TargetBookResolver {
   }
 
   private tryGetAnyAvailableWorldbook(): string | null {
-    const api = runtimeApi();
-    if (typeof api.getWorldbookNames === 'function') {
+    if (typeof this.api.getWorldbookNames === 'function') {
       try {
-        const names = normalizeBookList(api.getWorldbookNames());
+        const names = normalizeBookList(this.api.getWorldbookNames());
         if (names.length > 0) return names[0];
       } catch (error) {
         this.logger.warn('读取世界书列表失败', error);
       }
     }
 
-    if (typeof api.getGlobalWorldbookNames === 'function') {
+    if (typeof this.api.getGlobalWorldbookNames === 'function') {
       try {
-        const names = normalizeBookList(api.getGlobalWorldbookNames());
+        const names = normalizeBookList(this.api.getGlobalWorldbookNames());
         if (names.length > 0) return names[0];
       } catch (error) {
         this.logger.warn('读取全局世界书列表失败', error);
@@ -171,16 +158,15 @@ export class TargetBookResolver {
   }
 
   private async resolveManaged(targetBookName: string): Promise<string> {
-    const api = runtimeApi();
     const preferred = targetBookName || undefined;
 
     const existing = this.tryGetChatWorldbookName();
     if (existing) return existing;
 
-    if (typeof api.getOrCreateChatWorldbook === 'function') {
-      const created = await api.getOrCreateChatWorldbook('current', preferred);
-      if (typeof api.rebindChatWorldbook === 'function') {
-        await api.rebindChatWorldbook('current', created);
+    if (typeof this.api.getOrCreateChatWorldbook === 'function') {
+      const created = await this.api.getOrCreateChatWorldbook('current', preferred);
+      if (typeof this.api.rebindChatWorldbook === 'function') {
+        await this.api.rebindChatWorldbook('current', created);
       } else {
         this.logger.warn('托管模式创建成功，但聊天绑定接口不可用');
       }

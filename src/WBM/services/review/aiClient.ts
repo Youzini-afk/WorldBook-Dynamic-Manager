@@ -1,25 +1,20 @@
 import type { LoggerLike } from '../../core/types';
+import type { RuntimeReviewApi } from '../../infra/runtime/types';
 import type { AiClient, ChatMessage } from './reviewService';
-
-type RuntimeApi = {
-  generateRaw?: (payload: { ordered_prompts: ChatMessage[]; should_stream: boolean }) => Promise<string>;
-};
-
-function runtimeApi(): RuntimeApi {
-  return globalThis as RuntimeApi;
-}
 
 function toOpenAiMessages(messages: ChatMessage[]): Array<{ role: string; content: string }> {
   return messages.map(item => ({ role: item.role, content: item.content }));
 }
 
 export class TavernAiClient implements AiClient {
-  constructor(private readonly logger: LoggerLike) {}
+  constructor(
+    private readonly logger: LoggerLike,
+    private readonly api: RuntimeReviewApi,
+  ) {}
 
   async call(messages: ChatMessage[]): Promise<string> {
-    const api = runtimeApi();
-    if (typeof api.generateRaw === 'function') {
-      const output = await api.generateRaw({
+    if (typeof this.api.generateRaw === 'function') {
+      const output = await this.api.generateRaw({
         ordered_prompts: messages,
         should_stream: false,
       });
@@ -35,6 +30,7 @@ export interface ExternalAiClientOptions {
   apiKey?: string;
   model?: string;
   timeoutMs?: number;
+  fetchFn?: typeof fetch;
 }
 
 export class ExternalAiClient implements AiClient {
@@ -48,10 +44,16 @@ export class ExternalAiClient implements AiClient {
       this.logger.warn('外部 API endpoint 为空，返回空响应');
       return '';
     }
+    const fetchFn = this.options.fetchFn ?? (globalThis.fetch?.bind(globalThis) as typeof fetch | undefined);
+    if (typeof fetchFn !== 'function') {
+      this.logger.error('外部 API 请求异常：fetch 不可用');
+      return '';
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 30_000);
     try {
-      const response = await fetch(this.options.endpoint, {
+      const response = await fetchFn(this.options.endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

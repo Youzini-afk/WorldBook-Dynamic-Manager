@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TavernWorldbookRepository } from '../src/WBM/services/worldbook/repository';
+import type { RuntimeWorldbookApi } from '../src/WBM/infra/runtime/types';
 import { noopLogger } from './helpers';
 
 type MutableGlobal = typeof globalThis & Record<string, unknown>;
@@ -36,7 +37,7 @@ describe('TavernWorldbookRepository', () => {
     g.updateWorldbookWith = updateWorldbookWith;
     g.deleteWorldbookEntries = deleteWorldbookEntries;
 
-    const repo = new TavernWorldbookRepository(noopLogger);
+    const repo = new TavernWorldbookRepository(noopLogger, g as RuntimeWorldbookApi);
     const caps = repo.getCapabilities();
     expect(caps.highLevel).toBe(true);
     repo.logBackend();
@@ -62,7 +63,7 @@ describe('TavernWorldbookRepository', () => {
     g.setLorebookEntries = setLorebookEntries;
     g.deleteLorebookEntries = deleteLorebookEntries;
 
-    const repo = new TavernWorldbookRepository(noopLogger);
+    const repo = new TavernWorldbookRepository(noopLogger, g as RuntimeWorldbookApi);
     const caps = repo.getCapabilities();
     expect(caps.highLevel).toBe(false);
     expect(caps.legacy).toBe(true);
@@ -80,7 +81,7 @@ describe('TavernWorldbookRepository', () => {
   });
 
   it('接口不可用时抛错', async () => {
-    const repo = new TavernWorldbookRepository(noopLogger);
+    const repo = new TavernWorldbookRepository(noopLogger, {} satisfies RuntimeWorldbookApi);
     repo.logBackend();
     await expect(repo.getEntries('book')).rejects.toThrow('API 不可用');
     await expect(repo.addEntry('book', {})).rejects.toThrow('API 不可用');

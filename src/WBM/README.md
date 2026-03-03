@@ -5,10 +5,11 @@
 ## 目录结构
 
 - `core/`：共享类型与配置。
-- `infra/`：日志与事件订阅生命周期管理。
+- `infra/`：日志、事件订阅与 runtime 能力探测。
 - `services/`：parser/patch/router/scheduler/review/worldbook 服务层。
 - `ui/`：面板控制抽象。
-- `index.ts`：组合入口（`bootstrapWbmV3`）。
+- `bootstrap/`：装配根、运行时会话、legacy 兼容壳。
+- `index.ts`：轻量入口（`bootstrapWbmV3` / `unloadWbmV3`）。
 
 ## 构建与校验
 
@@ -45,6 +46,7 @@
 
 1. `manualReview` 不传 `messages` 时，会自动按 `reviewDepth` 读取最近聊天消息。
 2. 自动模式下会监听聊天事件（消息接收/发送、聊天切换、消息删除）驱动调度器，并在卸载时自动解绑。
+3. `getStatus()` 额外返回诊断字段：`backendAvailable`、`eventSourceAvailable`、`mountAvailable`。
 
 兼容壳：
 

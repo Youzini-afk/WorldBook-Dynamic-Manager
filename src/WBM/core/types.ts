@@ -105,6 +105,9 @@ export interface WbmStatus {
   queueSize: number;
   nextDueFloor: number;
   targetBookName: string;
+  backendAvailable: boolean;
+  eventSourceAvailable: boolean;
+  mountAvailable: boolean;
 }
 
 export interface LoggerLike {
@@ -127,4 +130,13 @@ export interface WbmPublicApi {
   listQueue(): PendingReviewItem[];
   listSnapshots(bookName?: string): SnapshotRecord[];
   getStatus(): WbmStatus;
+}
+
+export interface WbmLegacyApi extends WbmPublicApi {
+  approveAll(ids?: string[]): Promise<void>;
+  approveOne(id: string): Promise<void>;
+  rejectAll(ids?: string[]): Promise<number>;
+  rejectOne(id: string): Promise<number>;
+  getPendingQueue(): ReturnType<WbmPublicApi['listQueue']>;
+  getSnapshots(bookName?: string): ReturnType<WbmPublicApi['listSnapshots']>;
 }

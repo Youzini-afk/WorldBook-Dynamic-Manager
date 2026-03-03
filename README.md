@@ -28,6 +28,7 @@ npm run typecheck
 npm run lint
 npm run test
 npm run build
+npm run smoke:dist
 ```
 
 ### 生成发布产物
@@ -72,7 +73,8 @@ npm run build:release
 3. 发布流程：`docs/release-playbook.md`
 4. 与原项目改动总览：`docs/changes-from-original.md`
 5. 后续开发指南：`docs/development-guide.md`
-6. `src/WBM` 模块说明：`src/WBM/README.md`
+6. 故障排查手册：`docs/troubleshooting.md`
+7. `src/WBM` 模块说明：`src/WBM/README.md`
 
 ## 原作者信息与分发约定
 

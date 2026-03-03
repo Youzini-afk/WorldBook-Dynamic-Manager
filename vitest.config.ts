@@ -13,6 +13,7 @@ export default defineConfig({
       include: ['src/WBM/**/*.ts'],
       exclude: [
         'src/WBM/index.ts',
+        'src/WBM/bootstrap/**',
         'src/WBM/core/types.ts',
         'src/WBM/infra/**',
         'src/WBM/ui/**',

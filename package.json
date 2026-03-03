@@ -8,6 +8,7 @@
     "build": "webpack --mode production",
     "build:release": "webpack --mode production && node scripts/sync-single-file.mjs && node scripts/generate-tavern-imports.mjs",
     "build:imports": "node scripts/generate-tavern-imports.mjs",
+    "smoke:dist": "node scripts/smoke-dist.mjs",
     "watch": "webpack --mode development --watch --progress",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",

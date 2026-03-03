@@ -1,10 +1,7 @@
 import type { LoggerLike } from '../core/types';
+import type { RuntimeEventOnFn } from './runtime/types';
 
 type StopFn = () => void;
-
-declare const eventOn:
-  | ((eventType: string, listener: (...args: unknown[]) => void) => { stop: () => void })
-  | undefined;
 
 interface EventSourceLike {
   on(event: string, listener: (...args: unknown[]) => void): unknown;
@@ -17,13 +14,15 @@ export class EventSubscriptions {
   constructor(
     private readonly source: EventSourceLike | null,
     private readonly logger: LoggerLike,
+    private readonly eventOn?: RuntimeEventOnFn,
   ) {}
 
   on(event: string, listener: (...args: unknown[]) => void): void {
-    if (typeof eventOn === 'function') {
+    if (typeof this.eventOn === 'function') {
       try {
-        const binding = eventOn(event, listener);
+        const binding = this.eventOn(event, listener);
         this.stops.push(() => {
+          if (!binding || typeof binding.stop !== 'function') return;
           try {
             binding.stop();
           } catch (error) {
