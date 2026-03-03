@@ -308,6 +308,25 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   const eventMessageSent = getRuntimeEventName(runtime, 'MESSAGE_SENT', 'message_sent');
   const eventMessageDeleted = getRuntimeEventName(runtime, 'MESSAGE_DELETED', 'message_deleted');
   const eventChatChanged = getRuntimeEventName(runtime, 'CHAT_CHANGED', 'chat_id_changed');
+  const eventCharacterPageLoaded = getRuntimeEventName(
+    runtime,
+    'CHARACTER_PAGE_LOADED',
+    'character_page_loaded',
+  );
+  const eventCharacterEdited = getRuntimeEventName(runtime, 'CHARACTER_EDITED', 'character_edited');
+  const eventCharacterFirstMessageSelected = getRuntimeEventName(
+    runtime,
+    'CHARACTER_FIRST_MESSAGE_SELECTED',
+    'character_first_message_selected',
+  );
+
+  const resetRuntimeState = (reason: string): void => {
+    targetBookName = config.targetBookName;
+    scheduler.reset(0);
+    lastObservedFloor = 0;
+    logger.info(reason);
+    panel.refresh();
+  };
 
   events.on(eventMessageReceived, (...args) => {
     const floor = toMessageId(args[0]);
@@ -332,11 +351,16 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   });
   events.on(eventChatChanged, (...args) => {
     activeChatId = String(args[0] ?? '');
-    targetBookName = config.targetBookName;
-    scheduler.reset(0);
-    lastObservedFloor = 0;
-    logger.info(`聊天切换，已重置运行时状态: ${activeChatId || '(unknown)'}`);
-    panel.refresh();
+    resetRuntimeState(`聊天切换，已重置运行时状态: ${activeChatId || '(unknown)'}`);
+  });
+  events.on(eventCharacterPageLoaded, () => {
+    resetRuntimeState('角色页面已加载，已重置目标世界书与调度状态');
+  });
+  events.on(eventCharacterEdited, () => {
+    resetRuntimeState('角色卡已更新，已重置目标世界书与调度状态');
+  });
+  events.on(eventCharacterFirstMessageSelected, () => {
+    resetRuntimeState('角色首条消息已切换，已重置目标世界书与调度状态');
   });
 
   const legacyShell = buildLegacyShell(api, logger);

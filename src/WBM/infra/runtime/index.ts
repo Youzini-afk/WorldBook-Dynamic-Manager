@@ -103,7 +103,14 @@ export function detectRuntimeHealth(caps: RuntimeCapabilities): RuntimeHealth {
 
 export function getRuntimeEventName(
   caps: RuntimeCapabilities,
-  key: 'MESSAGE_RECEIVED' | 'MESSAGE_SENT' | 'MESSAGE_DELETED' | 'CHAT_CHANGED',
+  key:
+    | 'MESSAGE_RECEIVED'
+    | 'MESSAGE_SENT'
+    | 'MESSAGE_DELETED'
+    | 'CHAT_CHANGED'
+    | 'CHARACTER_PAGE_LOADED'
+    | 'CHARACTER_EDITED'
+    | 'CHARACTER_FIRST_MESSAGE_SELECTED',
   fallback: string,
 ): string {
   return caps.events.tavernEvents?.[key] ?? fallback;

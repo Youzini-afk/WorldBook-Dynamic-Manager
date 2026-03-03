@@ -34,7 +34,7 @@ export class TargetBookResolver {
       }
       const bindings = this.tryGetCharBindings();
       if (!bindings) {
-        throw new Error('未找到当前打开的角色卡，无法解析角色主世界书');
+        throw new Error('角色世界书接口不可用，无法解析角色主世界书');
       }
       if (!bindings.primary) {
         throw new Error('当前角色未绑定主世界书');
@@ -48,7 +48,7 @@ export class TargetBookResolver {
       }
       const bindings = this.tryGetCharBindings();
       if (!bindings) {
-        throw new Error('未找到当前打开的角色卡，无法解析角色附加世界书');
+        throw new Error('角色世界书接口不可用，无法解析角色附加世界书');
       }
       if (bindings.additional.length === 0) {
         throw new Error('当前角色未绑定附加世界书');
@@ -82,13 +82,7 @@ export class TargetBookResolver {
         return preferred;
       }
 
-      const fallback = this.tryGetAnyAvailableWorldbook();
-      if (fallback) {
-        this.logger.warn(`全局世界书查询接口不可用，已回退到可用世界书: ${fallback}`);
-        return fallback;
-      }
-
-      throw new Error('全局世界书查询接口不可用');
+      throw new Error('全局世界书查询接口不可用，且未配置目标世界书名');
     }
 
     return this.resolveManaged(preferred);
@@ -115,10 +109,8 @@ export class TargetBookResolver {
 
     if (typeof this.api.getCharWorldbookNames === 'function') {
       try {
-        const bindings = this.api.getCharWorldbookNames('current');
-        const primary = normalizeBookName(bindings?.primary);
-        const additional = normalizeBookList(bindings?.additional);
-        return primary != null || additional.length > 0;
+        const bindings = this.readCurrentCharWorldbookNames();
+        return bindings != null;
       } catch (error) {
         this.logger.warn('读取当前角色世界书失败', error);
       }
@@ -128,49 +120,46 @@ export class TargetBookResolver {
   }
 
   private tryGetCharBindings(): CharBindings | null {
-    if (typeof this.api.getCharWorldbookNames !== 'function') return null;
-    try {
-      const raw = this.api.getCharWorldbookNames('current');
-      return {
-        primary: normalizeBookName(raw?.primary),
-        additional: normalizeBookList(raw?.additional),
-      };
-    } catch (error) {
-      this.logger.warn('读取当前角色世界书失败', error);
-      return null;
-    }
+    const raw = this.readCurrentCharWorldbookNames();
+    if (!raw) return null;
+    return {
+      primary: normalizeBookName(raw.primary),
+      additional: normalizeBookList(raw.additional),
+    };
   }
 
   private tryGetChatWorldbookName(): string | null {
     if (typeof this.api.getChatWorldbookName !== 'function') return null;
+    const getter = this.api.getChatWorldbookName as (chat_name?: 'current') => string | null;
     try {
-      return normalizeBookName(this.api.getChatWorldbookName('current'));
-    } catch (error) {
-      this.logger.warn('读取当前聊天绑定世界书失败', error);
-      return null;
+      return normalizeBookName(getter('current'));
+    } catch {
+      try {
+        return normalizeBookName(getter());
+      } catch (error) {
+        this.logger.warn('读取当前聊天绑定世界书失败', error);
+        return null;
+      }
     }
   }
 
-  private tryGetAnyAvailableWorldbook(): string | null {
-    if (typeof this.api.getWorldbookNames === 'function') {
+  private readCurrentCharWorldbookNames():
+    | { primary?: unknown; additional?: unknown }
+    | null {
+    if (typeof this.api.getCharWorldbookNames !== 'function') return null;
+    const getter = this.api.getCharWorldbookNames as (
+      character_name?: 'current' | string,
+    ) => { primary?: unknown; additional?: unknown };
+    try {
+      return getter('current');
+    } catch {
       try {
-        const names = normalizeBookList(this.api.getWorldbookNames());
-        if (names.length > 0) return names[0];
+        return getter();
       } catch (error) {
-        this.logger.warn('读取世界书列表失败', error);
+        this.logger.warn('读取当前角色世界书失败', error);
+        return null;
       }
     }
-
-    if (typeof this.api.getGlobalWorldbookNames === 'function') {
-      try {
-        const names = normalizeBookList(this.api.getGlobalWorldbookNames());
-        if (names.length > 0) return names[0];
-      } catch (error) {
-        this.logger.warn('读取全局世界书列表失败', error);
-      }
-    }
-
-    return null;
   }
 
   private async resolveManaged(targetBookName: string): Promise<string> {
@@ -178,11 +167,34 @@ export class TargetBookResolver {
 
     const existing = this.tryGetChatWorldbookName();
     if (existing) return existing;
+    const hasCharacter = await this.hasCurrentCharacter();
 
     if (typeof this.api.getOrCreateChatWorldbook === 'function') {
-      const created = await this.api.getOrCreateChatWorldbook('current', preferred);
+      if (!hasCharacter) {
+        throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
+      }
+
+      const getOrCreate = this.api.getOrCreateChatWorldbook as (
+        chat_name?: 'current',
+        worldbook_name?: string,
+      ) => Promise<string>;
+      let created: string;
+      try {
+        created = await getOrCreate('current', preferred);
+      } catch {
+        created = await getOrCreate(undefined, preferred);
+      }
+
       if (typeof this.api.rebindChatWorldbook === 'function') {
-        await this.api.rebindChatWorldbook('current', created);
+        const rebind = this.api.rebindChatWorldbook as (
+          chat_name?: 'current',
+          worldbook_name?: string,
+        ) => Promise<void>;
+        try {
+          await rebind('current', created);
+        } catch {
+          await rebind(undefined, created);
+        }
       } else {
         this.logger.warn('托管模式创建成功，但聊天绑定接口不可用');
       }
@@ -192,6 +204,10 @@ export class TargetBookResolver {
     if (preferred) {
       this.logger.warn('托管模式接口不可用，使用配置中的目标世界书名');
       return preferred;
+    }
+
+    if (!hasCharacter) {
+      throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
     }
 
     const bindings = this.tryGetCharBindings();
@@ -204,12 +220,6 @@ export class TargetBookResolver {
       return bindings.additional[0];
     }
 
-    const fallback = this.tryGetAnyAvailableWorldbook();
-    if (fallback) {
-      this.logger.warn(`托管模式接口不可用，已回退到可用世界书: ${fallback}`);
-      return fallback;
-    }
-
-    throw new Error('托管模式接口不可用');
+    throw new Error('当前角色未绑定可用世界书，且托管模式接口不可用');
   }
 }

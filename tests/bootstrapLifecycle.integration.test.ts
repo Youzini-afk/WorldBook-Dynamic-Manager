@@ -43,4 +43,30 @@ describe('bootstrap lifecycle', () => {
     expect(() => unloadWbmV3()).not.toThrow();
     expect(() => unloadWbmV3()).not.toThrow();
   });
+
+  it('应注册角色切换相关事件，避免角色切换后目标世界书不刷新', () => {
+    const subscribedEvents: string[] = [];
+    const source = {
+      window: {} as Record<string, unknown>,
+      localStorage: memoryStorage(),
+      eventOn: (eventType: string, _listener: (...args: unknown[]) => void) => {
+        subscribedEvents.push(eventType);
+        return { stop: () => undefined };
+      },
+      tavern_events: {
+        MESSAGE_RECEIVED: 'message_received',
+        MESSAGE_SENT: 'message_sent',
+        MESSAGE_DELETED: 'message_deleted',
+        CHAT_CHANGED: 'chat_id_changed',
+        CHARACTER_PAGE_LOADED: 'character_page_loaded',
+        CHARACTER_EDITED: 'character_edited',
+        CHARACTER_FIRST_MESSAGE_SELECTED: 'character_first_message_selected',
+      },
+    };
+
+    expect(() => bootstrapWbmV3(source)).not.toThrow();
+    expect(subscribedEvents).toContain('character_page_loaded');
+    expect(subscribedEvents).toContain('character_edited');
+    expect(subscribedEvents).toContain('character_first_message_selected');
+  });
 });

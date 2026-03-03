@@ -185,7 +185,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import type { WbmConfig, WorldbookEntryLike } from '../../core/types';
 import type { PanelBridge } from './types';
 
@@ -215,6 +215,7 @@ const newEntryName = ref('');
 const newEntryContent = ref('');
 const rollbackFloorInput = ref<number | null>(null);
 const rollbackChatIdInput = ref('');
+const PANEL_REFRESH_EVENT = 'wbm3:panel-refresh';
 
 const logsText = computed(() =>
   logs.value
@@ -388,7 +389,38 @@ async function clearLogs(): Promise<void> {
   await refreshLogs();
 }
 
+async function refreshForActiveTab(): Promise<void> {
+  await refreshStatus();
+  if (activeTab.value === 0) {
+    await refreshEntries();
+    return;
+  }
+  if (activeTab.value === 4) {
+    await refreshStatus();
+    return;
+  }
+  if (activeTab.value === 5) {
+    await refreshQueue();
+    await refreshSnapshots();
+    return;
+  }
+  if (activeTab.value === 6) {
+    await refreshLogs();
+  }
+}
+
+function handlePanelRefreshEvent(): void {
+  void refreshForActiveTab();
+}
+
+watch(activeTab, () => {
+  void refreshForActiveTab();
+});
+
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    window.addEventListener(PANEL_REFRESH_EVENT, handlePanelRefreshEvent);
+  }
   const initEntries = await runData('初始化面板', () => props.bridge.listEntries());
   const initEntriesError = initEntries == null ? lastError.value : '';
   entries.value = initEntries ?? [];
@@ -406,6 +438,11 @@ onMounted(async () => {
   if (initEntriesError) {
     lastError.value = initEntriesError;
   }
+});
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') return;
+  window.removeEventListener(PANEL_REFRESH_EVENT, handlePanelRefreshEvent);
 });
 </script>
 

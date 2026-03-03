@@ -76,6 +76,9 @@ export interface RuntimeEventApi {
     MESSAGE_SENT?: string;
     MESSAGE_DELETED?: string;
     CHAT_CHANGED?: string;
+    CHARACTER_PAGE_LOADED?: string;
+    CHARACTER_EDITED?: string;
+    CHARACTER_FIRST_MESSAGE_SELECTED?: string;
   };
 }
 

@@ -96,10 +96,15 @@ describe('TargetBookResolver', () => {
   });
 
   it('角色校验 API 全缺失时，char 模式应拒绝拉取', async () => {
+    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
+    await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未找到当前打开的角色卡');
+  });
+
+  it('仅有 getCharWorldbookNames 且返回空绑定时，也应识别为已打开角色卡', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: [] });
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未找到当前打开的角色卡');
+    await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未绑定主世界书');
   });
 
   it('managed 模式会在未绑定时创建并回绑', async () => {
@@ -107,6 +112,7 @@ describe('TargetBookResolver', () => {
     const getChatWorldbookName = vi.fn().mockReturnValue(null);
     const getOrCreateChatWorldbook = vi.fn().mockResolvedValue('聊天托管书');
     const rebindChatWorldbook = vi.fn().mockResolvedValue(undefined);
+    g.getCurrentCharacterName = vi.fn().mockReturnValue('角色F');
     g.getChatWorldbookName = getChatWorldbookName;
     g.getOrCreateChatWorldbook = getOrCreateChatWorldbook;
     g.rebindChatWorldbook = rebindChatWorldbook;
@@ -131,11 +137,9 @@ describe('TargetBookResolver', () => {
     await expect(resolver.resolve('global', '全局直连')).resolves.toBe('全局直连');
   });
 
-  it('global 接口缺失时可回退到可用世界书', async () => {
-    const g = globalThis as MutableGlobal;
-    g.getWorldbookNames = vi.fn().mockReturnValue(['回退全局A']);
-    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('global', '')).resolves.toBe('回退全局A');
+  it('global 接口缺失且未配置目标名时应报错，不回退任意世界书', async () => {
+    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
+    await expect(resolver.resolve('global', '')).rejects.toThrow('全局世界书查询接口不可用');
   });
 
   it('managed 接口缺失但有指定名称时直接返回指定值', async () => {
@@ -157,17 +161,15 @@ describe('TargetBookResolver', () => {
     await expect(resolver.resolve('managed', '')).resolves.toBe('角色附加书');
   });
 
-  it('managed 接口缺失时回退到可用世界书', async () => {
-    const g = globalThis as MutableGlobal;
-    g.getWorldbookNames = vi.fn().mockReturnValue(['可用回退书']);
-    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('managed', '')).resolves.toBe('可用回退书');
+  it('managed 接口缺失且无角色卡时应报错，不回退任意世界书', async () => {
+    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
+    await expect(resolver.resolve('managed', '')).rejects.toThrow('未找到当前打开的角色卡');
   });
 
   it('managed 无任何可用回退时抛错', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: [] });
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('managed', '')).rejects.toThrow('托管模式接口不可用');
+    await expect(resolver.resolve('managed', '')).rejects.toThrow('当前角色未绑定可用世界书');
   });
 });

@@ -248,4 +248,21 @@ describe('WbmPanel UI', () => {
     expect(wrapper.text()).toContain('刷新条目失败');
     expect(wrapper.text()).not.toContain('旧条目');
   });
+
+  it('接收外部刷新事件时应重新拉取当前标签数据', async () => {
+    const listEntries = vi
+      .fn()
+      .mockResolvedValueOnce([{ uid: 1, name: '条目A', content: 'A', enabled: true }])
+      .mockResolvedValueOnce([{ uid: 2, name: '条目B', content: 'B', enabled: true }]);
+    const bridge = makeBridge({ listEntries });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('条目A');
+    window.dispatchEvent(new CustomEvent('wbm3:panel-refresh'));
+    await flushPromises();
+
+    expect(listEntries).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain('条目B');
+  });
 });

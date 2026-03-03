@@ -3,6 +3,8 @@ import type { LoggerLike } from '../../core/types';
 import WbmPanel from './WbmPanel.vue';
 import type { PanelBridge } from './types';
 
+export const PANEL_REFRESH_EVENT = 'wbm3:panel-refresh';
+
 export interface PanelController {
   open(): void;
   close(): void;
@@ -98,6 +100,7 @@ export class VuePanelController implements PanelController {
     this.opened = true;
     this.overlay.style.display = 'flex';
     this.replayOpenAnimation();
+    this.refresh();
     this.onVisibilityChange?.(true);
     this.logger.info('Vue 面板已打开');
   }
@@ -122,7 +125,8 @@ export class VuePanelController implements PanelController {
 
   refresh(): void {
     if (!this.opened) return;
-    // Vue 面板内部通过 bridge 按需读取状态，外部 refresh 保持为兼容触发点。
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent(PANEL_REFRESH_EVENT));
   }
 
   destroy(): void {
