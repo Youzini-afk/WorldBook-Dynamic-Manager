@@ -69,6 +69,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
   let isolationInfo: IsolationInfo = { chatId: 'chat-1', count: 0, entries: [] };
   let isolationStats: IsolationStats = { totalChats: 1, totalEntries: 0, byChat: [{ chatId: 'chat-1', count: 0 }] };
   let aiManagedNames: string[] = [];
+  let lockedNames: string[] = [];
   let queue: PendingReviewItem[] = [
     {
       id: 'q1',
@@ -110,6 +111,49 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
     }),
     listEntries: vi.fn(async () => entries.map(item => ({ ...item }))),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
+    listLockedNames: vi.fn(() => [...lockedNames]),
+    setEntryLocked: vi.fn(async (uid: number | string, locked: boolean) => {
+      const entry = entries.find(item => String(item.uid ?? item.id) === String(uid));
+      const name = String(entry?.name ?? entry?.comment ?? '').trim();
+      if (!name) return;
+      const next = lockedNames.filter(item => item.toLowerCase() !== name.toLowerCase());
+      if (locked) next.push(name);
+      lockedNames = next;
+    }),
+    batchSetEnabled: vi.fn(async (uids: Array<number | string>, enabled: boolean) => {
+      const uidSet = new Set(uids.map(item => String(item)));
+      let updated = 0;
+      let skipped = 0;
+      entries = entries.map(item => {
+        const uid = String(item.uid ?? item.id);
+        if (!uidSet.has(uid)) return item;
+        const name = String(item.name ?? item.comment ?? '').trim();
+        if (lockedNames.some(value => value.toLowerCase() === name.toLowerCase())) {
+          skipped++;
+          return item;
+        }
+        updated++;
+        return { ...item, enabled };
+      });
+      return { updated, skipped };
+    }),
+    batchDeleteEntries: vi.fn(async (uids: Array<number | string>) => {
+      const uidSet = new Set(uids.map(item => String(item)));
+      let deleted = 0;
+      let skipped = 0;
+      entries = entries.filter(item => {
+        const uid = String(item.uid ?? item.id);
+        if (!uidSet.has(uid)) return true;
+        const name = String(item.name ?? item.comment ?? '').trim();
+        if (lockedNames.some(value => value.toLowerCase() === name.toLowerCase())) {
+          skipped++;
+          return true;
+        }
+        deleted++;
+        return false;
+      });
+      return { deleted, skipped };
+    }),
     createEntry: vi.fn(async fields => {
       entries.push({ uid: entries.length + 1, ...fields });
     }),
@@ -170,6 +214,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       promptPresets = promptPresets.filter(item => item.id !== id);
     }),
     listBackendChats: vi.fn(() => backendChats.map(item => ({ ...item }))),
+    exportBackendChats: vi.fn(() => JSON.stringify({ records: backendChats })),
     verifyCurrentBook: vi.fn(async () => ({
       ok: true,
       checkedAt: new Date().toISOString(),

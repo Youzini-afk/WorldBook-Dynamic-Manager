@@ -17,6 +17,7 @@ export type WbmErrorCode =
   | 'REPOSITORY_API_UNAVAILABLE'
   | 'REPOSITORY_ENTRY_UID_MISSING'
   | 'ROUTER_ENTRY_NOT_FOUND'
+  | 'ROUTER_ENTRY_LOCKED'
   | 'ROUTER_ACTION_INVALID'
   | 'ROUTER_CONFIRM_UPDATE_REQUIRED'
   | 'ROUTER_MAX_CREATE_REACHED'
@@ -210,9 +211,16 @@ export interface BackendChatRecord {
   createdAt: string;
   source: 'manual' | 'auto';
   bookName: string;
+  floor?: number;
+  chatId?: string;
   promptPreview: string;
   outputPreview: string;
   commandCount: number;
+  durationMs?: number;
+  promptMessages?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+  rawReply?: string;
+  commands?: WorldUpdateCommand[];
+  results?: RouterResult[];
   success: boolean;
   error?: string;
 }
@@ -278,9 +286,20 @@ export interface WbmPublicApi {
   getStatus(): WbmStatus;
 
   getEntries(bookName?: string): Promise<WorldbookEntryLike[]>;
+  listLockedEntries(bookName?: string): string[];
+  setEntryLock(bookName: string, entryName: string, locked: boolean): boolean;
   addEntry(bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void>;
   updateEntry(bookName: string, entry: WorldbookEntryLike): Promise<void>;
   deleteEntry(bookName: string, uid: number | string): Promise<void>;
+  batchSetEnabled(
+    bookName: string,
+    uids: Array<number | string>,
+    enabled: boolean,
+  ): Promise<{ updated: number; skipped: number }>;
+  batchDeleteEntries(
+    bookName: string,
+    uids: Array<number | string>,
+  ): Promise<{ deleted: number; skipped: number }>;
   patchEntry(bookName: string, entryName: string, ops: PatchOp[]): Promise<{ applied: number; skipped: number; errors: string[] }>;
 
   parseCommands(text: string): WorldUpdateCommand[];
@@ -309,6 +328,9 @@ export interface WbmPublicApi {
   clearMyIsolation(bookName?: string): number;
   clearAllIsolation(bookName?: string): number;
   promoteIsolationToGlobal(bookName?: string): Promise<void>;
+
+  listBackendChats(): BackendChatRecord[];
+  exportBackendChats(ids?: string[]): string;
 }
 
 export interface WbmLegacyApi extends WbmPublicApi {}

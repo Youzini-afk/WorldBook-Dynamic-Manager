@@ -40,6 +40,7 @@ import { AiRegistry } from '../services/worldbook/aiRegistry';
 import { BackupManager } from '../services/worldbook/backupManager';
 import { BookSyncService } from '../services/worldbook/bookSync';
 import { ChatIsolation } from '../services/worldbook/chatIsolation';
+import { EntryLockStore } from '../services/worldbook/entryLockStore';
 import { TavernWorldbookRepository } from '../services/worldbook/repository';
 import { SnapshotStore } from '../services/worldbook/snapshotStore';
 import { TargetBookResolver } from '../services/worldbook/targetResolver';
@@ -94,6 +95,14 @@ function findEntryByUid(entries: WorldbookEntryLike[], uid: number | string): Wo
     if (String(currentUid) === needle) return entry;
   }
   return null;
+}
+
+function getEntryDisplayName(entry: WorldbookEntryLike): string {
+  return String(entry.name ?? entry.comment ?? '').trim();
+}
+
+function normalizeEntryName(input: string): string {
+  return input.trim().toLowerCase();
 }
 
 const FULL_ENTRY_TEMPLATE: WorldbookEntryLike = {
@@ -172,6 +181,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   const apiPresetManager = new ApiPresetManager(storage);
   const promptPresetManager = new PromptPresetManager(storage);
   const aiRegistry = new AiRegistry(storage);
+  const entryLocks = new EntryLockStore(storage);
   const isolation = new ChatIsolation(storage);
   const backupManager = new BackupManager(storage, config.snapshotRetention);
   const bookSync = new BookSyncService(repository, logger);
@@ -257,6 +267,72 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
   const collectMessages = (): ChatMessage[] => collectRecentChatMessages(config.reviewDepth, runtime.chat);
 
+  const listLockedEntries = (bookName: string): string[] => entryLocks.list(bookName);
+
+  const isLockedEntry = (bookName: string, entryName: string): boolean => {
+    if (!config.entryLockEnabled) return false;
+    return entryLocks.has(bookName, entryName);
+  };
+
+  const splitLockedCommands = (
+    commands: WorldUpdateCommand[],
+    bookName: string,
+  ): { executable: WorldUpdateCommand[]; lockedResults: RouterResult[] } => {
+    const executable: WorldUpdateCommand[] = [];
+    const lockedResults: RouterResult[] = [];
+    for (const command of commands) {
+      if (
+        (command.action === 'update' || command.action === 'patch' || command.action === 'delete') &&
+        isLockedEntry(bookName, command.entry_name)
+      ) {
+        lockedResults.push({
+          action: command.action,
+          entry_name: command.entry_name,
+          status: 'skipped',
+          code: 'ROUTER_ENTRY_LOCKED',
+          reason: '条目已锁定，跳过写入',
+        });
+        continue;
+      }
+      executable.push(command);
+    }
+    return { executable, lockedResults };
+  };
+
+  const executeCommandsWithLockGuard = async (
+    commands: WorldUpdateCommand[],
+    bookName: string,
+    options: {
+      approvalMode: 'auto' | 'manual' | 'selective';
+      source: 'manual' | 'auto' | 'legacy';
+      floor?: number;
+      chatId?: string;
+      confirmUpdate: boolean;
+      maxCreatePerRound: number;
+    },
+  ): Promise<RouterResult[]> => {
+    const { executable, lockedResults } = splitLockedCommands(commands, bookName);
+    if (executable.length === 0) return lockedResults;
+    const results = await router.execute(executable, bookName, options);
+    return [...lockedResults, ...results];
+  };
+
+  const findEntriesByUids = (
+    entries: WorldbookEntryLike[],
+    uids: Array<number | string>,
+  ): Map<string, WorldbookEntryLike> => {
+    const uidSet = new Set(uids.map(item => String(item)));
+    const matched = new Map<string, WorldbookEntryLike>();
+    for (const entry of entries) {
+      const uid = entry.uid ?? entry.id;
+      if (uid == null) continue;
+      const key = String(uid);
+      if (!uidSet.has(key)) continue;
+      matched.set(key, entry);
+    }
+    return matched;
+  };
+
   const executeReview = async (
     bookName: string,
     messages: ChatMessage[],
@@ -274,9 +350,14 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     processing = true;
     panel.refresh();
 
+    const startedAt = Date.now();
     let promptPreview = '';
     let replyPreview = '';
     let commandCount = 0;
+    let promptMessages: ChatMessage[] = [];
+    let parsedCommands: WorldUpdateCommand[] = [];
+    let executionResults: RouterResult[] = [];
+    let rawReply = '';
     try {
       const worldbookEntries = await repository.getEntries(bookName).catch(error => {
         logger.warn(`读取世界书失败，使用空上下文: ${bookName}`, error);
@@ -302,11 +383,14 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         scanText: contextScanner.buildScanText(messages, config.reviewDepth),
       });
 
+      promptMessages = trace.prompts;
+      parsedCommands = trace.commands;
+      rawReply = trace.reply;
       promptPreview = compactText(trace.prompts.map(item => `${item.role}:${item.content}`).join('\n'));
       replyPreview = compactText(trace.reply);
       commandCount = trace.commands.length;
 
-      const results = await router.execute(trace.commands, bookName, {
+      const results = await executeCommandsWithLockGuard(trace.commands, bookName, {
         approvalMode: config.approvalMode,
         source,
         floor,
@@ -314,6 +398,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         confirmUpdate: config.confirmUpdate,
         maxCreatePerRound: config.maxCreatePerRound,
       });
+      executionResults = results;
 
       if (config.aiRegistryEnabled) {
         for (const result of results) {
@@ -343,9 +428,16 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         createdAt: new Date().toISOString(),
         source,
         bookName,
+        floor,
+        chatId: activeChatId || undefined,
         promptPreview,
         outputPreview: replyPreview,
         commandCount,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        promptMessages,
+        rawReply,
+        commands: parsedCommands.map(item => ({ ...item, fields: { ...item.fields }, ops: [...item.ops] })),
+        results: executionResults.map(item => ({ ...item })),
         success: !results.some(item => item.status === 'error'),
       });
     } catch (error) {
@@ -355,9 +447,16 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         createdAt: new Date().toISOString(),
         source,
         bookName,
+        floor,
+        chatId: activeChatId || undefined,
         promptPreview,
         outputPreview: replyPreview,
         commandCount,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        promptMessages,
+        rawReply,
+        commands: parsedCommands.map(item => ({ ...item, fields: { ...item.fields }, ops: [...item.ops] })),
+        results: executionResults.map(item => ({ ...item })),
         success: false,
         error: reason,
       });
@@ -426,25 +525,66 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (!targetBookName) return [];
       return aiRegistry.list(targetBookName).map(item => item.entryName);
     },
+    listLockedNames: () => {
+      if (!targetBookName) return [];
+      return listLockedEntries(targetBookName);
+    },
+    setEntryLocked: async (uid, locked) => {
+      const target = await resolveBookName();
+      const entries = await repository.getEntries(target);
+      const found = findEntryByUid(entries, uid);
+      const entryName = getEntryDisplayName(found ?? {});
+      if (!entryName) throw new Error('未找到待锁定条目');
+      if (locked) entryLocks.lock(target, entryName);
+      else entryLocks.unlock(target, entryName);
+      panel.refresh();
+    },
+    batchSetEnabled: async (uids, enabled) => await batchSetEnabled(await resolveBookName(), uids, enabled),
+    batchDeleteEntries: async uids => await batchDeleteEntries(await resolveBookName(), uids),
     createEntry: async fields => {
       const target = await resolveBookName();
+      const entryName = getEntryDisplayName(fields as WorldbookEntryLike);
+      if (entryName && isLockedEntry(target, entryName)) {
+        throw new Error(`条目已锁定，禁止写入: ${entryName}`);
+      }
       await repository.addEntry(target, fields);
       panel.refresh();
     },
     updateEntry: async entry => {
       const target = await resolveBookName();
+      const entries = await repository.getEntries(target);
+      const uid = entry.uid ?? entry.id;
+      const before = uid == null ? null : findEntryByUid(entries, uid);
+      const beforeName = getEntryDisplayName(before ?? {});
+      if (beforeName && isLockedEntry(target, beforeName)) {
+        throw new Error(`条目已锁定，禁止更新: ${beforeName}`);
+      }
       await repository.updateEntry(target, entry);
+      const afterName = getEntryDisplayName(entry);
+      if (
+        beforeName &&
+        afterName &&
+        normalizeEntryName(beforeName) !== normalizeEntryName(afterName) &&
+        entryLocks.has(target, beforeName)
+      ) {
+        entryLocks.unlock(target, beforeName);
+        entryLocks.lock(target, afterName);
+      }
       panel.refresh();
     },
     deleteEntry: async uid => {
       const target = await resolveBookName();
-      if (config.aiRegistryEnabled) {
-        const entries = await repository.getEntries(target);
-        const found = findEntryByUid(entries, uid);
-        const entryName = String(found?.name ?? found?.comment ?? '').trim();
-        if (entryName) aiRegistry.unmark(target, entryName);
+      const entries = await repository.getEntries(target);
+      const found = findEntryByUid(entries, uid);
+      const entryName = getEntryDisplayName(found ?? {});
+      if (entryName && isLockedEntry(target, entryName)) {
+        throw new Error(`条目已锁定，禁止删除: ${entryName}`);
       }
       await repository.deleteEntry(target, uid);
+      if (entryName) {
+        if (config.aiRegistryEnabled) aiRegistry.unmark(target, entryName);
+        entryLocks.unlock(target, entryName);
+      }
       panel.refresh();
     },
     manualReview: async () => {
@@ -530,7 +670,27 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     rollbackFloor: async (floor, chatId) => {
       await api.rollbackFloor(floor, chatId);
     },
-    listBackendChats: () => [...backendChats],
+    listBackendChats: () =>
+      backendChats.map(item => ({
+        ...item,
+        promptMessages: item.promptMessages ? item.promptMessages.map(message => ({ ...message })) : undefined,
+        commands: item.commands ? item.commands.map(command => ({ ...command, fields: { ...command.fields }, ops: [...command.ops] })) : undefined,
+        results: item.results ? item.results.map(result => ({ ...result })) : undefined,
+      })),
+    exportBackendChats: ids => {
+      const idSet = ids && ids.length > 0 ? new Set(ids) : null;
+      const records = backendChats.filter(item => (idSet ? idSet.has(item.id) : true));
+      return JSON.stringify(
+        {
+          exportedAt: new Date().toISOString(),
+          version,
+          total: records.length,
+          records,
+        },
+        null,
+        2,
+      );
+    },
     verifyCurrentBook: async () => {
       const bookName = await resolveBookName();
       return await bookSync.verify(bookName);
@@ -580,18 +740,111 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   };
 
   const addEntry = async (bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void> => {
+    const entryName = getEntryDisplayName(fields as WorldbookEntryLike);
+    if (entryName && isLockedEntry(bookName, entryName)) {
+      throw new Error(`条目已锁定，禁止写入: ${entryName}`);
+    }
     await repository.addEntry(bookName, fields);
     panel.refresh();
   };
 
   const updateEntry = async (bookName: string, entry: WorldbookEntryLike): Promise<void> => {
+    const entries = await repository.getEntries(bookName);
+    const uid = entry.uid ?? entry.id;
+    const before = uid == null ? null : findEntryByUid(entries, uid);
+    const beforeName = getEntryDisplayName(before ?? {});
+    if (beforeName && isLockedEntry(bookName, beforeName)) {
+      throw new Error(`条目已锁定，禁止更新: ${beforeName}`);
+    }
     await repository.updateEntry(bookName, entry);
+    const afterName = getEntryDisplayName(entry);
+    if (
+      beforeName &&
+      afterName &&
+      normalizeEntryName(beforeName) !== normalizeEntryName(afterName) &&
+      entryLocks.has(bookName, beforeName)
+    ) {
+      entryLocks.unlock(bookName, beforeName);
+      entryLocks.lock(bookName, afterName);
+    }
     panel.refresh();
   };
 
   const deleteEntry = async (bookName: string, uid: number | string): Promise<void> => {
+    const entries = await repository.getEntries(bookName);
+    const before = findEntryByUid(entries, uid);
+    const beforeName = getEntryDisplayName(before ?? {});
+    if (beforeName && isLockedEntry(bookName, beforeName)) {
+      throw new Error(`条目已锁定，禁止删除: ${beforeName}`);
+    }
     await repository.deleteEntry(bookName, uid);
+    if (beforeName) {
+      aiRegistry.unmark(bookName, beforeName);
+      entryLocks.unlock(bookName, beforeName);
+    }
     panel.refresh();
+  };
+
+  const batchSetEnabled = async (
+    bookName: string,
+    uids: Array<number | string>,
+    enabled: boolean,
+  ): Promise<{ updated: number; skipped: number }> => {
+    const entries = await repository.getEntries(bookName);
+    const matched = findEntriesByUids(entries, uids);
+    let updated = 0;
+    let skipped = 0;
+    for (const uid of uids) {
+      const current = matched.get(String(uid));
+      if (!current) {
+        skipped++;
+        continue;
+      }
+      const entryName = getEntryDisplayName(current);
+      if (entryName && isLockedEntry(bookName, entryName)) {
+        skipped++;
+        continue;
+      }
+      await repository.updateEntry(bookName, { ...current, enabled });
+      updated++;
+    }
+    panel.refresh();
+    return { updated, skipped };
+  };
+
+  const batchDeleteEntries = async (
+    bookName: string,
+    uids: Array<number | string>,
+  ): Promise<{ deleted: number; skipped: number }> => {
+    const entries = await repository.getEntries(bookName);
+    const matched = findEntriesByUids(entries, uids);
+    let deleted = 0;
+    let skipped = 0;
+    for (const uid of uids) {
+      const current = matched.get(String(uid));
+      if (!current) {
+        skipped++;
+        continue;
+      }
+      const entryName = getEntryDisplayName(current);
+      if (entryName && isLockedEntry(bookName, entryName)) {
+        skipped++;
+        continue;
+      }
+      const entryUid = current.uid ?? current.id;
+      if (entryUid == null) {
+        skipped++;
+        continue;
+      }
+      await repository.deleteEntry(bookName, entryUid);
+      if (entryName) {
+        aiRegistry.unmark(bookName, entryName);
+        entryLocks.unlock(bookName, entryName);
+      }
+      deleted++;
+    }
+    panel.refresh();
+    return { deleted, skipped };
   };
 
   const patchEntry = async (
@@ -599,6 +852,13 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     entryName: string,
     ops: PatchOp[],
   ): Promise<{ applied: number; skipped: number; errors: string[] }> => {
+    if (isLockedEntry(bookName, entryName)) {
+      return {
+        applied: 0,
+        skipped: 0,
+        errors: ['条目已锁定，禁止 patch'],
+      };
+    }
     const entries = await repository.getEntries(bookName);
     const target = findEntryByName(entries, entryName);
     if (!target) throw new Error(`未找到条目: ${entryName}`);
@@ -612,7 +872,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   };
 
   const executeCommands = async (commands: WorldUpdateCommand[], bookName: string): Promise<RouterResult[]> => {
-    const results = await router.execute(commands, bookName, {
+    const results = await executeCommandsWithLockGuard(commands, bookName, {
       approvalMode: config.approvalMode,
       source: 'manual',
       floor: lastObservedFloor,
@@ -679,7 +939,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     approveQueue: async ids => {
       const pendingItems = queue.take(ids);
       for (const pending of pendingItems) {
-        await router.execute(pending.commands, pending.bookName, {
+        const results = await executeCommandsWithLockGuard(pending.commands, pending.bookName, {
           approvalMode: 'auto',
           source: pending.source,
           floor: pending.floor,
@@ -687,6 +947,13 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
           confirmUpdate: config.confirmUpdate,
           maxCreatePerRound: config.maxCreatePerRound,
         });
+        if (config.aiRegistryEnabled) {
+          for (const result of results) {
+            if (result.status !== 'ok') continue;
+            if (result.action !== 'create' && result.action !== 'update' && result.action !== 'patch') continue;
+            aiRegistry.mark(pending.bookName, result.entry_name, pending.source === 'legacy' ? 'manual' : pending.source);
+          }
+        }
       }
       panel.refresh();
     },
@@ -714,9 +981,22 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     getStatus: () => getStatus(),
 
     getEntries,
+    listLockedEntries: bookName => {
+      const target = String(bookName ?? targetBookName ?? '').trim();
+      if (!target) return [];
+      return listLockedEntries(target);
+    },
+    setEntryLock: (bookName, entryName, locked) => {
+      const target = String(bookName || targetBookName || '').trim();
+      if (!target) return false;
+      if (locked) return entryLocks.lock(target, entryName);
+      return entryLocks.unlock(target, entryName);
+    },
     addEntry,
     updateEntry,
     deleteEntry,
+    batchSetEnabled,
+    batchDeleteEntries,
     patchEntry,
 
     parseCommands: text => parser.parse(text),
@@ -749,6 +1029,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const promoted = isolation.promoteToGlobal(_bookName);
       logger.info(`隔离条目已标记晋升: ${promoted.length}`);
     },
+    listBackendChats: () => [...backendChats],
+    exportBackendChats: ids => panelBridge.exportBackendChats(ids),
   };
 
   const eventMessageReceived = getRuntimeEventName(runtime, 'MESSAGE_RECEIVED', 'message_received');

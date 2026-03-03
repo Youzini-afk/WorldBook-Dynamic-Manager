@@ -21,6 +21,10 @@ export interface PanelBridge {
   saveConfig(next: WbmConfig): Promise<void> | void;
   listEntries(): Promise<WorldbookEntryLike[]>;
   listAiManagedNames(): string[];
+  listLockedNames(): string[];
+  setEntryLocked(uid: number | string, locked: boolean): Promise<void>;
+  batchSetEnabled(uids: Array<number | string>, enabled: boolean): Promise<{ updated: number; skipped: number }>;
+  batchDeleteEntries(uids: Array<number | string>): Promise<{ deleted: number; skipped: number }>;
   createEntry(fields: Partial<WorldbookEntryLike>): Promise<void>;
   updateEntry(entry: WorldbookEntryLike): Promise<void>;
   deleteEntry(uid: number | string): Promise<void>;
@@ -44,6 +48,7 @@ export interface PanelBridge {
   applyPromptPreset(id: string): Promise<void> | void;
   deletePromptPreset(id: string): Promise<void> | void;
   listBackendChats(): BackendChatRecord[];
+  exportBackendChats(ids?: string[]): string;
   verifyCurrentBook(): Promise<BookSyncResult>;
   getIsolationInfo(): IsolationInfo;
   getIsolationStats(): IsolationStats;

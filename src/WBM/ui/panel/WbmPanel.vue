@@ -27,11 +27,23 @@
       <section v-if="activeTab === 0" key="pane-worldbook" class="wbm-pane">
         <div class="wbm-row">
           <button class="wbm-btn" @click="refreshEntries">刷新</button>
+          <button class="wbm-btn" @click="refreshLockedNames">刷新锁定</button>
           <button class="wbm-btn" @click="refreshAiManagedNames">刷新AI标记</button>
           <button class="wbm-btn wbm-btn-primary" @click="manualReview">手动审核</button>
         </div>
         <div class="wbm-row">
           <span class="wbm-chip">AI托管条目 {{ aiManagedNames.length }}</span>
+          <span class="wbm-chip">锁定条目 {{ lockedNames.length }}</span>
+          <span class="wbm-chip">已选中 {{ selectedEntryUids.length }}</span>
+        </div>
+        <div class="wbm-row">
+          <button class="wbm-btn wbm-btn-mini" @click="selectAllEntries">全选</button>
+          <button class="wbm-btn wbm-btn-mini" @click="clearSelectedEntries">清空选中</button>
+          <button class="wbm-btn wbm-btn-mini" @click="batchEnable(true)">批量启用</button>
+          <button class="wbm-btn wbm-btn-mini" @click="batchEnable(false)">批量禁用</button>
+          <button class="wbm-btn wbm-btn-mini" @click="batchLock(true)">批量锁定</button>
+          <button class="wbm-btn wbm-btn-mini" @click="batchLock(false)">批量解锁</button>
+          <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="batchDelete">批量删除</button>
         </div>
         <div class="wbm-card">
           <div class="wbm-row">
@@ -44,12 +56,22 @@
           <div v-for="entry in entries" :key="String(entry.uid ?? entry.id ?? entry.name)" class="wbm-item">
             <div class="wbm-row is-spread">
               <div class="wbm-row">
+                <input
+                  :checked="isEntrySelected(entry)"
+                  type="checkbox"
+                  class="wbm-entry-check"
+                  @change="toggleEntrySelection(entry, $event)"
+                />
                 <strong>{{ entry.name || entry.comment || '(未命名)' }}</strong>
                 <span v-if="isAiManaged(entry)" class="wbm-chip is-accent">AI托管</span>
+                <span v-if="isEntryLocked(entry)" class="wbm-chip is-lock">锁定</span>
                 <span v-if="entry.constant === true" class="wbm-chip">常量</span>
                 <span v-if="entry.selective === false" class="wbm-chip">非选择</span>
               </div>
               <div class="wbm-row">
+                <button class="wbm-btn wbm-btn-mini" @click="toggleEntryLock(entry)">
+                  {{ isEntryLocked(entry) ? '解锁' : '锁定' }}
+                </button>
                 <button class="wbm-btn wbm-btn-mini" @click="toggleEntry(entry)">
                   {{ entry.enabled === false ? '启用' : '禁用' }}
                 </button>
@@ -322,6 +344,7 @@
         <div class="wbm-card">
           <div class="wbm-row">
             <button class="wbm-btn" @click="refreshBackendChats">刷新后台记录</button>
+            <button class="wbm-btn" @click="exportBackendRecords">导出后台记录</button>
             <button class="wbm-btn wbm-btn-primary" @click="verifyCurrentBook">验证当前世界书</button>
           </div>
           <div v-if="verifyResult" class="wbm-item is-small">
@@ -332,10 +355,35 @@
           <div v-for="item in backendChats" :key="item.id" class="wbm-item is-small">
             <div class="wbm-row is-spread">
               <strong>{{ item.bookName }}</strong>
-              <span>{{ item.success ? '成功' : '失败' }} / 指令 {{ item.commandCount }}</span>
+              <span>{{ item.success ? '成功' : '失败' }} / 指令 {{ item.commandCount }} / {{ item.durationMs ?? 0 }}ms</span>
             </div>
-            <div>{{ item.createdAt }}</div>
+            <div class="wbm-row is-spread">
+              <span>{{ item.createdAt }}</span>
+              <button class="wbm-btn wbm-btn-mini" @click="selectBackendRecord(item.id)">查看详情</button>
+            </div>
             <div>{{ item.outputPreview || item.error || '(空响应)' }}</div>
+          </div>
+          <div v-if="selectedBackendRecord" class="wbm-item">
+            <div class="wbm-row is-spread">
+              <strong>后台明细 · {{ selectedBackendRecord.id }}</strong>
+              <button class="wbm-btn wbm-btn-mini" @click="exportBackendRecords([selectedBackendRecord.id])">
+                导出当前
+              </button>
+            </div>
+            <div>来源: {{ selectedBackendRecord.source }} | 楼层: {{ selectedBackendRecord.floor ?? '-' }} | 聊天: {{ selectedBackendRecord.chatId ?? '-' }}</div>
+            <div>请求消息: {{ selectedBackendRecord.promptMessages?.length ?? 0 }} 条 | 指令: {{ selectedBackendRecord.commandCount }}</div>
+            <details class="wbm-details">
+              <summary>Prompt 预览</summary>
+              <pre class="wbm-logs is-inline">{{ formatBackendMessages(selectedBackendRecord.promptMessages) }}</pre>
+            </details>
+            <details class="wbm-details">
+              <summary>模型回复</summary>
+              <pre class="wbm-logs is-inline">{{ selectedBackendRecord.rawReply || selectedBackendRecord.outputPreview || '(空)' }}</pre>
+            </details>
+            <details class="wbm-details">
+              <summary>执行结果</summary>
+              <pre class="wbm-logs is-inline">{{ formatBackendResults(selectedBackendRecord) }}</pre>
+            </details>
           </div>
         </div>
       </section>
@@ -435,6 +483,8 @@ const logs = ref(props.bridge.getLogs());
 const lastError = ref('');
 const promptEntriesText = ref('');
 const aiManagedNames = ref<string[]>([]);
+const lockedNames = ref<string[]>([]);
+const selectedEntryUids = ref<string[]>([]);
 const apiPresets = ref<ApiPreset[]>([]);
 const promptPresets = ref<PromptPreset[]>([]);
 const selectedApiPresetId = ref('');
@@ -442,6 +492,7 @@ const selectedPromptPresetId = ref('');
 const newApiPresetName = ref('');
 const newPromptPresetName = ref('');
 const backendChats = ref<BackendChatRecord[]>([]);
+const selectedBackendId = ref('');
 const verifyResult = ref<BookSyncResult | null>(null);
 const isolationInfo = ref<IsolationInfo>(props.bridge.getIsolationInfo());
 const isolationStats = ref<IsolationStats>(props.bridge.getIsolationStats());
@@ -456,6 +507,10 @@ const logsText = computed(() =>
   logs.value
     .map(item => `[${item.time}] [${item.level}] [${item.namespace}] ${item.message}`)
     .join('\n'),
+);
+
+const selectedBackendRecord = computed<BackendChatRecord | null>(
+  () => backendChats.value.find(item => item.id === selectedBackendId.value) ?? null,
 );
 
 function formatApprovalMode(value: string): string {
@@ -480,6 +535,65 @@ function isAiManaged(entry: WorldbookEntryLike): boolean {
   const name = String(entry.name ?? entry.comment ?? '').trim();
   if (!name) return false;
   return aiManagedNames.value.includes(name);
+}
+
+function getEntryUid(entry: WorldbookEntryLike): string {
+  const uid = entry.uid ?? entry.id;
+  return uid == null ? '' : String(uid);
+}
+
+function isEntryLocked(entry: WorldbookEntryLike): boolean {
+  const name = String(entry.name ?? entry.comment ?? '').trim();
+  if (!name) return false;
+  return lockedNames.value.some(item => item.trim().toLowerCase() === name.toLowerCase());
+}
+
+function isEntrySelected(entry: WorldbookEntryLike): boolean {
+  const uid = getEntryUid(entry);
+  if (!uid) return false;
+  return selectedEntryUids.value.includes(uid);
+}
+
+function toggleEntrySelection(entry: WorldbookEntryLike, event: Event): void {
+  const uid = getEntryUid(entry);
+  if (!uid) return;
+  const checked = (event.target as HTMLInputElement).checked;
+  if (checked) {
+    if (!selectedEntryUids.value.includes(uid)) {
+      selectedEntryUids.value = [...selectedEntryUids.value, uid];
+    }
+    return;
+  }
+  selectedEntryUids.value = selectedEntryUids.value.filter(item => item !== uid);
+}
+
+function formatBackendMessages(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> | undefined,
+): string {
+  if (!messages || messages.length === 0) return '(空)';
+  return messages.map(item => `[${item.role}] ${item.content}`).join('\n\n');
+}
+
+function formatBackendResults(record: BackendChatRecord): string {
+  const payload = {
+    commands: record.commands ?? [],
+    results: record.results ?? [],
+    error: record.error ?? null,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+function downloadJsonFile(filename: string, content: string): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 }
 
 function setEntryTextField(entry: WorldbookEntryLike, field: string, event: Event): void {
@@ -539,9 +653,13 @@ async function refreshEntries(): Promise<void> {
   if (next == null) {
     // 拉取失败时清空列表，避免继续展示旧聊天/旧角色的残留条目。
     entries.value = [];
+    selectedEntryUids.value = [];
     return;
   }
   entries.value = next;
+  const available = new Set(next.map(item => getEntryUid(item)).filter(Boolean));
+  selectedEntryUids.value = selectedEntryUids.value.filter(uid => available.has(uid));
+  await refreshLockedNames();
   await refreshAiManagedNames();
   await refreshStatus();
 }
@@ -550,6 +668,12 @@ async function refreshAiManagedNames(): Promise<void> {
   const next = await runData('刷新 AI 托管标记', () => props.bridge.listAiManagedNames());
   if (next == null) return;
   aiManagedNames.value = next;
+}
+
+async function refreshLockedNames(): Promise<void> {
+  await runVoid('刷新锁定条目', () => {
+    lockedNames.value = props.bridge.listLockedNames();
+  });
 }
 
 async function refreshQueue(): Promise<void> {
@@ -593,6 +717,9 @@ async function refreshBackendChats(): Promise<void> {
   const next = await runData('刷新后台记录', () => props.bridge.listBackendChats());
   if (next == null) return;
   backendChats.value = next;
+  if (!next.some(item => item.id === selectedBackendId.value)) {
+    selectedBackendId.value = next[0]?.id ?? '';
+  }
 }
 
 async function refreshIsolation(): Promise<void> {
@@ -768,6 +895,68 @@ async function removeEntry(entry: WorldbookEntryLike): Promise<void> {
   await refreshEntries();
 }
 
+function selectAllEntries(): void {
+  selectedEntryUids.value = entries.value.map(item => getEntryUid(item)).filter(Boolean);
+}
+
+function clearSelectedEntries(): void {
+  selectedEntryUids.value = [];
+}
+
+async function toggleEntryLock(entry: WorldbookEntryLike): Promise<void> {
+  const uid = entry.uid ?? entry.id;
+  if (uid == null) return;
+  const locked = isEntryLocked(entry);
+  const ok = await runVoid(locked ? '解锁条目' : '锁定条目', async () => {
+    await props.bridge.setEntryLocked(uid, !locked);
+  });
+  if (!ok) return;
+  await refreshLockedNames();
+}
+
+async function batchLock(locked: boolean): Promise<void> {
+  if (selectedEntryUids.value.length === 0) return;
+  const ok = await runVoid(locked ? '批量锁定' : '批量解锁', async () => {
+    for (const uid of selectedEntryUids.value) {
+      await props.bridge.setEntryLocked(uid, locked);
+    }
+  });
+  if (!ok) return;
+  await refreshLockedNames();
+}
+
+async function batchEnable(enabled: boolean): Promise<void> {
+  if (selectedEntryUids.value.length === 0) return;
+  const ok = await runVoid(enabled ? '批量启用' : '批量禁用', async () => {
+    await props.bridge.batchSetEnabled(selectedEntryUids.value, enabled);
+  });
+  if (!ok) return;
+  await refreshEntries();
+}
+
+async function batchDelete(): Promise<void> {
+  if (selectedEntryUids.value.length === 0) return;
+  const ok = await runVoid('批量删除', async () => {
+    await props.bridge.batchDeleteEntries(selectedEntryUids.value);
+  });
+  if (!ok) return;
+  selectedEntryUids.value = [];
+  await refreshEntries();
+}
+
+function selectBackendRecord(id: string): void {
+  selectedBackendId.value = id;
+}
+
+async function exportBackendRecords(ids?: string[]): Promise<void> {
+  const ok = await runVoid('导出后台记录', () => {
+    const raw = props.bridge.exportBackendChats(ids);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadJsonFile(`wbm3-backend-${stamp}.json`, raw);
+  });
+  if (!ok) return;
+}
+
 async function manualReview(): Promise<void> {
   const ok = await runVoid('手动审核', async () => {
     await props.bridge.manualReview();
@@ -845,6 +1034,7 @@ async function refreshForActiveTab(): Promise<void> {
   await refreshStatus();
   if (activeTab.value === 0) {
     await refreshEntries();
+    await refreshLockedNames();
     await refreshAiManagedNames();
     return;
   }
@@ -904,6 +1094,7 @@ onMounted(async () => {
   await refreshPromptPresets();
   await refreshBackendChats();
   await refreshIsolation();
+  await refreshLockedNames();
   await refreshAiManagedNames();
   await refreshStatus();
   if (initEntriesError) {
@@ -1124,6 +1315,14 @@ onBeforeUnmount(() => {
   border-color: rgba(232, 183, 132, 0.48);
   background: rgba(208, 154, 102, 0.25);
   color: var(--wbm-text-main);
+}
+.wbm-chip.is-lock {
+  border-color: rgba(123, 176, 135, 0.45);
+  background: rgba(69, 113, 79, 0.3);
+  color: #d7f0dd;
+}
+.wbm-entry-check {
+  accent-color: var(--wbm-accent-strong);
 }
 .wbm-row.is-spread {
   justify-content: space-between;
@@ -1359,6 +1558,21 @@ onBeforeUnmount(() => {
   color: #d9cec1;
   font-family: "Cascadia Code", "JetBrains Mono", "Consolas", monospace !important;
   font-size: 12px;
+}
+.wbm-logs.is-inline {
+  margin: 8px 0 0;
+  max-height: 220px;
+}
+.wbm-details {
+  border: 1px solid rgba(255, 214, 170, 0.12);
+  border-radius: 12px;
+  background: rgba(20, 17, 15, 0.55);
+  padding: 8px 10px;
+}
+.wbm-details summary {
+  cursor: pointer;
+  color: var(--wbm-text-sub);
+  font-weight: 600;
 }
 .wbm-shell label {
   color: var(--wbm-text-sub);

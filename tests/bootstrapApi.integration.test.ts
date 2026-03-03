@@ -10,6 +10,19 @@ interface RuntimeGlobal {
     rejectQueue(ids?: string[]): Promise<number>;
     listQueue(): unknown[];
     listSnapshots(bookName?: string): unknown[];
+    listLockedEntries(bookName?: string): string[];
+    setEntryLock(bookName: string, entryName: string, locked: boolean): boolean;
+    batchSetEnabled(
+      bookName: string,
+      uids: Array<number | string>,
+      enabled: boolean,
+    ): Promise<{ updated: number; skipped: number }>;
+    batchDeleteEntries(
+      bookName: string,
+      uids: Array<number | string>,
+    ): Promise<{ deleted: number; skipped: number }>;
+    listBackendChats(): unknown[];
+    exportBackendChats(ids?: string[]): string;
     rollbackFloor(floor: number, chatId?: string): Promise<void>;
   };
   WBM?: {
@@ -42,6 +55,11 @@ describe('bootstrapWbmV3 API bridge', () => {
     expect(runtime.WBM).toBeDefined();
     expect(runtime.WBM3?.listQueue()).toEqual([]);
     expect(runtime.WBM3?.listSnapshots()).toEqual([]);
+    expect(runtime.WBM3?.listLockedEntries()).toEqual([]);
+    expect(runtime.WBM3?.listBackendChats()).toEqual([]);
+    expect(typeof runtime.WBM3?.exportBackendChats()).toBe('string');
+    expect(runtime.WBM3?.setEntryLock('bookA', 'entry-1', true)).toBe(true);
+    expect(runtime.WBM3?.listLockedEntries('bookA')).toEqual(['entry-1']);
 
     const approveSpy = vi.spyOn(runtime.WBM3!, 'approveQueue').mockResolvedValue();
     const rejectSpy = vi.spyOn(runtime.WBM3!, 'rejectQueue').mockResolvedValue(0);
@@ -58,4 +76,3 @@ describe('bootstrapWbmV3 API bridge', () => {
     expect(runtime.WBM!.getSnapshots('bookA')).toEqual([]);
   });
 });
-
