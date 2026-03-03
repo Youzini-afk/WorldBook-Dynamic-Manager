@@ -29,6 +29,9 @@ export class TargetBookResolver {
     const preferred = targetBookName.trim();
 
     if (targetType === 'charPrimary') {
+      if (!this.hasCurrentCharacter()) {
+        throw new Error('未找到当前打开的角色卡，无法解析角色主世界书');
+      }
       const bindings = this.tryGetCharBindings();
       if (!bindings) {
         throw new Error('未找到当前打开的角色卡，无法解析角色主世界书');
@@ -40,6 +43,9 @@ export class TargetBookResolver {
     }
 
     if (targetType === 'charAdditional') {
+      if (!this.hasCurrentCharacter()) {
+        throw new Error('未找到当前打开的角色卡，无法解析角色附加世界书');
+      }
       const bindings = this.tryGetCharBindings();
       if (!bindings) {
         throw new Error('未找到当前打开的角色卡，无法解析角色附加世界书');
@@ -86,6 +92,17 @@ export class TargetBookResolver {
     }
 
     return this.resolveManaged(preferred);
+  }
+
+  private hasCurrentCharacter(): boolean {
+    if (typeof this.api.getCurrentCharacterName !== 'function') return true;
+    try {
+      const currentName = normalizeBookName(this.api.getCurrentCharacterName());
+      return currentName != null;
+    } catch (error) {
+      this.logger.warn('读取当前角色卡名称失败', error);
+      return false;
+    }
   }
 
   private tryGetCharBindings(): CharBindings | null {

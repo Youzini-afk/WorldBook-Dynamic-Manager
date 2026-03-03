@@ -261,7 +261,11 @@ async function refreshStatus(): Promise<void> {
 
 async function refreshEntries(): Promise<void> {
   const next = await runData('刷新条目', () => props.bridge.listEntries());
-  if (next == null) return;
+  if (next == null) {
+    // 拉取失败时清空列表，避免继续展示旧聊天/旧角色的残留条目。
+    entries.value = [];
+    return;
+  }
   entries.value = next;
   await refreshStatus();
 }
@@ -385,13 +389,23 @@ async function clearLogs(): Promise<void> {
 }
 
 onMounted(async () => {
-  await runVoid('初始化面板', async () => {
-    entries.value = await props.bridge.listEntries();
-    queue.value = props.bridge.listQueue();
-    snapshots.value = props.bridge.listSnapshots();
-    logs.value = props.bridge.getLogs();
-    status.value = props.bridge.getStatus();
-  });
+  const initEntries = await runData('初始化面板', () => props.bridge.listEntries());
+  const initEntriesError = initEntries == null ? lastError.value : '';
+  entries.value = initEntries ?? [];
+
+  const initQueue = await runData('初始化队列', () => props.bridge.listQueue());
+  if (initQueue != null) queue.value = initQueue;
+
+  const initSnapshots = await runData('初始化快照', () => props.bridge.listSnapshots());
+  if (initSnapshots != null) snapshots.value = initSnapshots;
+
+  const initLogs = await runData('初始化日志', () => props.bridge.getLogs());
+  if (initLogs != null) logs.value = initLogs;
+
+  await refreshStatus();
+  if (initEntriesError) {
+    lastError.value = initEntriesError;
+  }
 });
 </script>
 

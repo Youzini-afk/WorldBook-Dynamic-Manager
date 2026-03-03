@@ -232,4 +232,20 @@ describe('WbmPanel UI', () => {
     await clickButton(wrapper, '清除');
     expect(wrapper.find('.wbm-error-banner').exists()).toBe(false);
   });
+
+  it('条目刷新失败时应清空旧条目，避免展示陈旧数据', async () => {
+    const listEntries = vi
+      .fn()
+      .mockResolvedValueOnce([{ uid: 1, name: '旧条目', content: '旧内容', enabled: true }])
+      .mockRejectedValueOnce(new Error('未找到当前打开的角色卡'));
+    const bridge = makeBridge({ listEntries });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('旧条目');
+
+    await clickButton(wrapper, '刷新');
+    expect(wrapper.text()).toContain('刷新条目失败');
+    expect(wrapper.text()).not.toContain('旧条目');
+  });
 });

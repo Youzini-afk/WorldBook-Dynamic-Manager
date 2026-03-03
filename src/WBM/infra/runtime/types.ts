@@ -8,6 +8,7 @@ export interface RuntimeChatMessage {
 }
 
 export interface RuntimeWorldbookApi {
+  getCurrentCharacterName?: () => string | null;
   getWorldbook?: (name: string) => Promise<WorldbookEntryLike[]>;
   createWorldbookEntries?: (
     name: string,

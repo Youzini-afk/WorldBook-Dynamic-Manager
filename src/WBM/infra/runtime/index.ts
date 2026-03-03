@@ -16,6 +16,7 @@ interface RuntimeGlobal {
   deleteLorebookEntries?: RuntimeCapabilities['worldbook']['deleteLorebookEntries'];
 
   getCharWorldbookNames?: RuntimeCapabilities['worldbook']['getCharWorldbookNames'];
+  getCurrentCharacterName?: RuntimeCapabilities['worldbook']['getCurrentCharacterName'];
   getGlobalWorldbookNames?: RuntimeCapabilities['worldbook']['getGlobalWorldbookNames'];
   getWorldbookNames?: RuntimeCapabilities['worldbook']['getWorldbookNames'];
   getChatWorldbookName?: RuntimeCapabilities['worldbook']['getChatWorldbookName'];
@@ -41,6 +42,7 @@ export function createRuntimeCapabilities(source: unknown = globalThis): Runtime
 
   return {
     worldbook: {
+      getCurrentCharacterName: runtime.getCurrentCharacterName,
       getWorldbook: runtime.getWorldbook,
       createWorldbookEntries: runtime.createWorldbookEntries,
       updateWorldbookWith: runtime.updateWorldbookWith,
