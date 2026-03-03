@@ -308,6 +308,18 @@ describe('WbmPanel UI', () => {
     expect(bridge.manualReview).toHaveBeenCalledTimes(1);
   });
 
+  it('查找替换工具可批量修改条目内容', async () => {
+    const bridge = makeBridge();
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    await wrapper.find('input[placeholder="查找内容（支持正则）"]').setValue('内容A');
+    await wrapper.find('input[placeholder="替换内容"]').setValue('内容B');
+    await clickButton(wrapper, '执行替换');
+
+    expect(bridge.updateEntry).toHaveBeenCalledWith(expect.objectContaining({ content: '内容B' }));
+  });
+
   it('提示词/API/调度标签可保存配置', async () => {
     const bridge = makeBridge();
     const wrapper = mount(WbmPanel, { props: { bridge } });

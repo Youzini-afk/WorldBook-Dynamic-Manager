@@ -61,6 +61,56 @@
             />
           </div>
         </div>
+        <div class="wbm-card">
+          <strong>查找替换工具</strong>
+          <div class="wbm-row">
+            <input v-model="findQuery" placeholder="查找内容（支持正则）" />
+            <input v-model="replaceText" placeholder="替换内容" />
+          </div>
+          <div class="wbm-row">
+            <select v-model="findScope">
+              <option value="all">范围：全部条目</option>
+              <option value="current">范围：当前选中条目</option>
+            </select>
+            <label class="wbm-inline-check">
+              <input v-model="findRegexMode" type="checkbox" />
+              <span>正则模式</span>
+            </label>
+            <label class="wbm-inline-check">
+              <input v-model="findFieldName" type="checkbox" />
+              <span>名称</span>
+            </label>
+            <label class="wbm-inline-check">
+              <input v-model="findFieldContent" type="checkbox" />
+              <span>内容</span>
+            </label>
+            <label class="wbm-inline-check">
+              <input v-model="findFieldKeys" type="checkbox" />
+              <span>关键词</span>
+            </label>
+            <label class="wbm-inline-check">
+              <input v-model="findFieldSecondaryKeys" type="checkbox" />
+              <span>副关键词</span>
+            </label>
+          </div>
+          <div class="wbm-row">
+            <input v-model="findExcludeTokens" placeholder="排除词（逗号分隔）" />
+            <button class="wbm-btn wbm-btn-mini" @click="previewFindReplace">预览查找</button>
+            <button class="wbm-btn wbm-btn-primary wbm-btn-mini" @click="executeFindReplace">执行替换</button>
+          </div>
+          <div class="wbm-row">
+            <span class="wbm-chip">命中条目 {{ findSummary.matchedEntries }}</span>
+            <span class="wbm-chip">命中次数 {{ findSummary.totalMatches }}</span>
+            <span class="wbm-chip">排除条目 {{ findSummary.excludedEntries }}</span>
+          </div>
+          <div v-for="item in findHits" :key="item.id" class="wbm-item is-small">
+            <div class="wbm-row is-spread">
+              <strong>{{ item.entryName }}</strong>
+              <span>{{ item.field }} · {{ item.matches }} 次</span>
+            </div>
+            <div>{{ item.preview }}</div>
+          </div>
+        </div>
         <div class="wbm-row">
           <span class="wbm-chip">AI托管条目 {{ aiManagedNames.length }}</span>
           <span class="wbm-chip">锁定条目 {{ lockedNames.length }}</span>
@@ -490,6 +540,62 @@
             </div>
           </div>
         </div>
+        <div class="wbm-card">
+          <strong>世界书历史对比</strong>
+          <div class="wbm-row">
+            <select v-model="worldbookLeftVersionId">
+              <option v-for="item in worldbookVersionOptions" :key="item.id" :value="item.id">
+                左侧：{{ item.label }}
+              </option>
+            </select>
+            <select v-model="worldbookRightVersionId">
+              <option v-for="item in worldbookVersionOptions" :key="`r-${item.id}`" :value="item.id">
+                右侧：{{ item.label }}
+              </option>
+            </select>
+          </div>
+          <div class="wbm-row">
+            <button class="wbm-btn wbm-btn-mini" @click="restoreWorldbookVersion(worldbookLeftVersionId)">
+              恢复左侧版本
+            </button>
+            <button class="wbm-btn wbm-btn-mini" @click="restoreWorldbookVersion(worldbookRightVersionId)">
+              恢复右侧版本
+            </button>
+          </div>
+          <pre class="wbm-logs is-inline">{{ worldbookDiffText }}</pre>
+        </div>
+        <div class="wbm-card">
+          <strong>条目历史对比</strong>
+          <div class="wbm-row">
+            <select v-model="entryHistoryUid">
+              <option value="">选择条目</option>
+              <option v-for="item in entryHistoryEntryOptions" :key="item.uid" :value="item.uid">
+                {{ item.label }}
+              </option>
+            </select>
+          </div>
+          <div class="wbm-row">
+            <select v-model="entryLeftVersionId">
+              <option v-for="item in entryVersionOptions" :key="`el-${item.id}`" :value="item.id">
+                左侧：{{ item.label }}
+              </option>
+            </select>
+            <select v-model="entryRightVersionId">
+              <option v-for="item in entryVersionOptions" :key="`er-${item.id}`" :value="item.id">
+                右侧：{{ item.label }}
+              </option>
+            </select>
+          </div>
+          <div class="wbm-row">
+            <button class="wbm-btn wbm-btn-mini" @click="restoreEntryVersion(entryLeftVersionId)">
+              恢复左侧条目
+            </button>
+            <button class="wbm-btn wbm-btn-mini" @click="restoreEntryVersion(entryRightVersionId)">
+              恢复右侧条目
+            </button>
+          </div>
+          <pre class="wbm-logs is-inline">{{ entryDiffText }}</pre>
+        </div>
       </section>
 
       <section v-else key="pane-logs" class="wbm-pane">
@@ -524,6 +630,31 @@ import type { PanelBridge } from './types';
 
 const props = defineProps<{ bridge: PanelBridge }>();
 defineEmits<{ close: [] }>();
+
+type DiffVersionOption = {
+  id: string;
+  label: string;
+  source: 'current' | 'snapshot';
+  snapshotId?: string;
+  entries: WorldbookEntryLike[];
+};
+
+type EntryDiffVersionOption = {
+  id: string;
+  label: string;
+  source: 'current' | 'snapshot';
+  snapshotId?: string;
+  entry: WorldbookEntryLike | null;
+};
+
+type FindHit = {
+  id: string;
+  uid: string;
+  entryName: string;
+  field: 'name' | 'content' | 'keys' | 'secondary_keys';
+  matches: number;
+  preview: string;
+};
 
 const tabs = [
   { key: 'worldbook', label: '世界书' },
@@ -568,6 +699,29 @@ const newEntryContent = ref('');
 const importTargetBookName = ref('');
 const importConflictPolicy = ref<ImportConflictPolicy>('overwrite');
 const importFileInputRef = ref<HTMLInputElement | null>(null);
+
+const findQuery = ref('');
+const replaceText = ref('');
+const findScope = ref<'all' | 'current'>('all');
+const findRegexMode = ref(false);
+const findFieldName = ref(true);
+const findFieldContent = ref(true);
+const findFieldKeys = ref(false);
+const findFieldSecondaryKeys = ref(false);
+const findExcludeTokens = ref('');
+const findHits = ref<FindHit[]>([]);
+const findSummary = reactive({
+  matchedEntries: 0,
+  totalMatches: 0,
+  excludedEntries: 0,
+});
+
+const worldbookLeftVersionId = ref('current');
+const worldbookRightVersionId = ref('current');
+const entryHistoryUid = ref('');
+const entryLeftVersionId = ref('current');
+const entryRightVersionId = ref('current');
+
 const rollbackFloorInput = ref<number | null>(null);
 const rollbackChatIdInput = ref('');
 const PANEL_REFRESH_EVENT = 'wbm3:panel-refresh';
@@ -581,6 +735,78 @@ const logsText = computed(() =>
 const selectedBackendRecord = computed<BackendChatRecord | null>(
   () => backendChats.value.find(item => item.id === selectedBackendId.value) ?? null,
 );
+
+const worldbookVersionOptions = computed<DiffVersionOption[]>(() => {
+  const current: DiffVersionOption = {
+    id: 'current',
+    label: `当前版本（${entries.value.length} 条）`,
+    source: 'current',
+    entries: entries.value.map(item => ({ ...item })),
+  };
+  const historical = snapshots.value.map(item => ({
+    id: `snapshot:${item.id}`,
+    label: `${item.id} | floor=${item.floor ?? '-'} | ${item.reason}`,
+    source: 'snapshot' as const,
+    snapshotId: item.id,
+    entries: item.entries.map(entry => ({ ...entry })),
+  }));
+  return [current, ...historical];
+});
+
+const entryHistoryEntryOptions = computed(() =>
+  entries.value.map(item => {
+    const uid = getEntryUid(item);
+    const name = String(item.name ?? item.comment ?? '(未命名)').trim();
+    return {
+      uid,
+      label: `${name} | uid=${uid || '-'}`,
+    };
+  }),
+);
+
+const entryVersionOptions = computed<EntryDiffVersionOption[]>(() => {
+  const targetUid = entryHistoryUid.value.trim();
+  if (!targetUid) return [];
+
+  const currentEntry =
+    entries.value.find(item => String(item.uid ?? item.id ?? '') === targetUid) ?? null;
+  const options: EntryDiffVersionOption[] = [
+    {
+      id: 'current',
+      label: '当前版本',
+      source: 'current',
+      entry: currentEntry ? { ...currentEntry } : null,
+    },
+  ];
+
+  for (const snapshot of snapshots.value) {
+    const matched =
+      snapshot.entries.find(item => String(item.uid ?? item.id ?? '') === targetUid) ?? null;
+    options.push({
+      id: `snapshot:${snapshot.id}`,
+      label: `${snapshot.id} | floor=${snapshot.floor ?? '-'} | ${snapshot.reason}`,
+      source: 'snapshot',
+      snapshotId: snapshot.id,
+      entry: matched ? { ...matched } : null,
+    });
+  }
+  return options;
+});
+
+const worldbookDiffText = computed(() => {
+  const left = getVersionOptionById(worldbookLeftVersionId.value) ?? worldbookVersionOptions.value[0] ?? null;
+  const right = getVersionOptionById(worldbookRightVersionId.value) ?? worldbookVersionOptions.value[0] ?? null;
+  if (!left || !right) return '(无可用版本)';
+  return buildSimpleLineDiff(normalizeEntriesForDiff(left.entries), normalizeEntriesForDiff(right.entries));
+});
+
+const entryDiffText = computed(() => {
+  if (!entryHistoryUid.value) return '(请先选择条目)';
+  const left = getEntryVersionOptionById(entryLeftVersionId.value);
+  const right = getEntryVersionOptionById(entryRightVersionId.value);
+  if (!left || !right) return '(无可用条目版本)';
+  return buildSimpleLineDiff(normalizeEntryForDiff(left.entry), normalizeEntryForDiff(right.entry));
+});
 
 function formatApprovalMode(value: string): string {
   if (value === 'auto') return '自动执行（auto）';
@@ -672,6 +898,131 @@ function readFileAsText(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
     reader.readAsText(file);
   });
+}
+
+function buildSimpleLineDiff(leftText: string, rightText: string): string {
+  const leftLines = leftText.split('\n');
+  const rightLines = rightText.split('\n');
+  const maxLength = Math.max(leftLines.length, rightLines.length);
+  const rows: string[] = [];
+  for (let index = 0; index < maxLength; index++) {
+    const left = leftLines[index];
+    const right = rightLines[index];
+    if (left === right) {
+      rows.push(`  ${left ?? ''}`);
+      continue;
+    }
+    if (left !== undefined) rows.push(`- ${left}`);
+    if (right !== undefined) rows.push(`+ ${right}`);
+  }
+  return rows.join('\n');
+}
+
+function normalizeEntriesForDiff(source: WorldbookEntryLike[]): string {
+  const normalized = source.map(item => ({
+    uid: item.uid ?? item.id ?? null,
+    name: String(item.name ?? item.comment ?? ''),
+    enabled: item.enabled !== false,
+    keys: item.keys ?? '',
+    secondary_keys: item.secondary_keys ?? '',
+    content: String(item.content ?? ''),
+  }));
+  return JSON.stringify(normalized, null, 2);
+}
+
+function normalizeEntryForDiff(entry: WorldbookEntryLike | null): string {
+  if (!entry) return '(空)';
+  return JSON.stringify(
+    {
+      uid: entry.uid ?? entry.id ?? null,
+      name: String(entry.name ?? entry.comment ?? ''),
+      enabled: entry.enabled !== false,
+      keys: entry.keys ?? '',
+      secondary_keys: entry.secondary_keys ?? '',
+      content: String(entry.content ?? ''),
+    },
+    null,
+    2,
+  );
+}
+
+function getVersionOptionById(id: string): DiffVersionOption | null {
+  return worldbookVersionOptions.value.find(item => item.id === id) ?? null;
+}
+
+function getEntryVersionOptionById(id: string): EntryDiffVersionOption | null {
+  return entryVersionOptions.value.find(item => item.id === id) ?? null;
+}
+
+function parseExcludeTokens(raw: string): string[] {
+  return raw
+    .split(',')
+    .map(item => item.trim().toLowerCase())
+    .filter(item => item.length > 0);
+}
+
+function splitKeyText(raw: unknown): string {
+  if (Array.isArray(raw)) return raw.map(item => String(item)).join(',');
+  return String(raw ?? '');
+}
+
+function getEntryFieldText(
+  entry: WorldbookEntryLike,
+  field: 'name' | 'content' | 'keys' | 'secondary_keys',
+): string {
+  if (field === 'name') return String(entry.name ?? entry.comment ?? '');
+  if (field === 'content') return String(entry.content ?? '');
+  if (field === 'keys') return splitKeyText(entry.keys);
+  return splitKeyText(entry.secondary_keys);
+}
+
+function setEntryFieldText(
+  entry: WorldbookEntryLike,
+  field: 'name' | 'content' | 'keys' | 'secondary_keys',
+  value: string,
+): void {
+  if (field === 'name') {
+    entry.name = value;
+    return;
+  }
+  if (field === 'content') {
+    entry.content = value;
+    return;
+  }
+  if (field === 'keys') {
+    entry.keys = value;
+    return;
+  }
+  entry.secondary_keys = value;
+}
+
+function countPlainMatches(text: string, needle: string): number {
+  if (!needle) return 0;
+  let cursor = 0;
+  let count = 0;
+  while (cursor <= text.length) {
+    const hit = text.indexOf(needle, cursor);
+    if (hit === -1) break;
+    count++;
+    cursor = hit + Math.max(needle.length, 1);
+  }
+  return count;
+}
+
+function countRegexMatches(text: string, regex: RegExp): number {
+  regex.lastIndex = 0;
+  let count = 0;
+  let result: RegExpExecArray | null = null;
+  while ((result = regex.exec(text)) != null) {
+    count++;
+    if (result[0].length === 0) regex.lastIndex += 1;
+  }
+  return count;
+}
+
+function replacePlainText(text: string, needle: string, replacement: string): string {
+  if (!needle) return text;
+  return text.split(needle).join(replacement);
 }
 
 function setEntryTextField(entry: WorldbookEntryLike, field: string, event: Event): void {
@@ -888,6 +1239,169 @@ async function onImportFileChange(event: Event): Promise<void> {
   config.targetBookName = target;
   await refreshWorldbookOptions();
   await refreshEntries();
+}
+
+function resolveFindTargets(): WorldbookEntryLike[] {
+  if (findScope.value === 'all') {
+    return entries.value;
+  }
+  const selectedUid = selectedEntryUids.value[0] ?? entryHistoryUid.value;
+  if (!selectedUid) {
+    throw new Error('当前条目范围需要先勾选或选择一个条目');
+  }
+  const target = entries.value.find(item => getEntryUid(item) === selectedUid);
+  if (!target) throw new Error('未找到当前条目');
+  return [target];
+}
+
+function resolveFindFields(): Array<'name' | 'content' | 'keys' | 'secondary_keys'> {
+  const fields: Array<'name' | 'content' | 'keys' | 'secondary_keys'> = [];
+  if (findFieldName.value) fields.push('name');
+  if (findFieldContent.value) fields.push('content');
+  if (findFieldKeys.value) fields.push('keys');
+  if (findFieldSecondaryKeys.value) fields.push('secondary_keys');
+  if (fields.length === 0) {
+    throw new Error('请至少选择一个查找字段');
+  }
+  return fields;
+}
+
+function resolveFindRegex(): RegExp | null {
+  if (!findRegexMode.value) return null;
+  const pattern = findQuery.value;
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, 'g');
+  } catch {
+    throw new Error('正则表达式无效');
+  }
+  // 防止零宽匹配造成死循环
+  if (regex.test('')) {
+    throw new Error('正则表达式不能匹配空字符串');
+  }
+  regex.lastIndex = 0;
+  return regex;
+}
+
+function entryContainsExcludeToken(entry: WorldbookEntryLike, tokens: string[]): boolean {
+  if (tokens.length === 0) return false;
+  const haystack = [
+    String(entry.uid ?? entry.id ?? ''),
+    String(entry.name ?? ''),
+    String(entry.comment ?? ''),
+    String(entry.content ?? ''),
+    splitKeyText(entry.keys),
+    splitKeyText(entry.secondary_keys),
+  ]
+    .join('\n')
+    .toLowerCase();
+  return tokens.some(token => haystack.includes(token));
+}
+
+async function previewFindReplace(): Promise<void> {
+  const keyword = findQuery.value;
+  if (!keyword) {
+    findHits.value = [];
+    findSummary.matchedEntries = 0;
+    findSummary.totalMatches = 0;
+    findSummary.excludedEntries = 0;
+    return;
+  }
+  const ok = await runVoid('预览查找', () => {
+    const fields = resolveFindFields();
+    const regex = resolveFindRegex();
+    const targets = resolveFindTargets();
+    const excludeTokens = parseExcludeTokens(findExcludeTokens.value);
+
+    const hits: FindHit[] = [];
+    let matchedEntries = 0;
+    let totalMatches = 0;
+    let excludedEntries = 0;
+
+    for (const entry of targets) {
+      if (entryContainsExcludeToken(entry, excludeTokens)) {
+        excludedEntries++;
+        continue;
+      }
+
+      let entryMatched = false;
+      for (const field of fields) {
+        const text = getEntryFieldText(entry, field);
+        const matches = regex
+          ? countRegexMatches(text, regex)
+          : countPlainMatches(text, keyword);
+        if (matches <= 0) continue;
+        entryMatched = true;
+        totalMatches += matches;
+        hits.push({
+          id: `${getEntryUid(entry)}:${field}`,
+          uid: getEntryUid(entry),
+          entryName: String(entry.name ?? entry.comment ?? '(未命名)').trim(),
+          field,
+          matches,
+          preview: text.replace(/\s+/g, ' ').trim().slice(0, 140),
+        });
+      }
+      if (entryMatched) matchedEntries++;
+    }
+
+    findHits.value = hits;
+    findSummary.matchedEntries = matchedEntries;
+    findSummary.totalMatches = totalMatches;
+    findSummary.excludedEntries = excludedEntries;
+  });
+  if (!ok) return;
+}
+
+async function executeFindReplace(): Promise<void> {
+  const keyword = findQuery.value;
+  if (!keyword) {
+    setError('执行替换', '请先输入查找内容');
+    return;
+  }
+  const ok = await runVoid('执行替换', async () => {
+    const fields = resolveFindFields();
+    const regex = resolveFindRegex();
+    const targets = resolveFindTargets();
+    const excludeTokens = parseExcludeTokens(findExcludeTokens.value);
+
+    let updated = 0;
+    let skipped = 0;
+
+    for (const rawEntry of targets) {
+      if (entryContainsExcludeToken(rawEntry, excludeTokens)) {
+        skipped++;
+        continue;
+      }
+
+      const nextEntry: WorldbookEntryLike = { ...rawEntry };
+      let changed = false;
+      for (const field of fields) {
+        const before = getEntryFieldText(nextEntry, field);
+        const after = regex
+          ? before.replace(regex, replaceText.value)
+          : replacePlainText(before, keyword, replaceText.value);
+        if (after === before) continue;
+        setEntryFieldText(nextEntry, field, after);
+        changed = true;
+      }
+
+      if (!changed) {
+        skipped++;
+        continue;
+      }
+
+      await props.bridge.updateEntry(nextEntry);
+      updated++;
+    }
+
+    if (updated === 0) {
+      throw new Error(`未修改任何条目（跳过 ${skipped} 条）`);
+    }
+  });
+  if (!ok) return;
+  await refreshEntries();
+  await previewFindReplace();
 }
 
 async function saveApiSettings(): Promise<void> {
@@ -1168,6 +1682,34 @@ async function rollbackFloor(): Promise<void> {
   await refreshSnapshots();
 }
 
+async function restoreWorldbookVersion(versionId: string): Promise<void> {
+  const option = getVersionOptionById(versionId);
+  if (!option) return;
+  if (option.source === 'current') return;
+  if (!option.snapshotId) return;
+  const ok = await runVoid('恢复世界书版本', async () => {
+    await props.bridge.rollback(option.snapshotId as string);
+  });
+  if (!ok) return;
+  await refreshEntries();
+  await refreshSnapshots();
+}
+
+async function restoreEntryVersion(versionId: string): Promise<void> {
+  const option = getEntryVersionOptionById(versionId);
+  if (!option) return;
+  if (!option.entry) {
+    setError('恢复条目版本', '目标版本中不存在该条目');
+    return;
+  }
+  const ok = await runVoid('恢复条目版本', async () => {
+    await props.bridge.updateEntry({ ...option.entry });
+  });
+  if (!ok) return;
+  await refreshEntries();
+  await refreshSnapshots();
+}
+
 async function clearLogs(): Promise<void> {
   const ok = await runVoid('清空日志', () => {
     props.bridge.clearLogs();
@@ -1271,6 +1813,41 @@ watch(
   () => {
     void refreshWorldbookOptions();
   },
+);
+
+watch(
+  worldbookVersionOptions,
+  options => {
+    if (!options.some(item => item.id === worldbookLeftVersionId.value)) {
+      worldbookLeftVersionId.value = options[0]?.id ?? 'current';
+    }
+    if (!options.some(item => item.id === worldbookRightVersionId.value)) {
+      worldbookRightVersionId.value = options[1]?.id ?? options[0]?.id ?? 'current';
+    }
+  },
+  { immediate: true },
+);
+
+watch(
+  entryHistoryEntryOptions,
+  options => {
+    if (entryHistoryUid.value && options.some(item => item.uid === entryHistoryUid.value)) return;
+    entryHistoryUid.value = options[0]?.uid ?? '';
+  },
+  { immediate: true },
+);
+
+watch(
+  entryVersionOptions,
+  options => {
+    if (!options.some(item => item.id === entryLeftVersionId.value)) {
+      entryLeftVersionId.value = options[0]?.id ?? 'current';
+    }
+    if (!options.some(item => item.id === entryRightVersionId.value)) {
+      entryRightVersionId.value = options[1]?.id ?? options[0]?.id ?? 'current';
+    }
+  },
+  { immediate: true },
 );
 
 onMounted(async () => {
@@ -1500,6 +2077,17 @@ onBeforeUnmount(() => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+.wbm-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 170, 0.14);
+  background: rgba(31, 27, 23, 0.55);
+  color: var(--wbm-text-sub);
+  font-size: 12px;
 }
 .wbm-chip {
   display: inline-flex;
