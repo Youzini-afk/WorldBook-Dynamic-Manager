@@ -8,6 +8,7 @@ type MutableGlobal = typeof globalThis & Record<string, unknown>;
 function clearApis(): void {
   const g = globalThis as MutableGlobal;
   delete g.getCurrentCharacterName;
+  delete g.getCharacter;
   delete g.getCharWorldbookNames;
   delete g.getGlobalWorldbookNames;
   delete g.getWorldbookNames;
@@ -84,6 +85,21 @@ describe('TargetBookResolver', () => {
     g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书D', additional: ['附加D'] });
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
     await expect(resolver.resolve('charAdditional', '')).rejects.toThrow('未找到当前打开的角色卡');
+  });
+
+  it('缺少 getCurrentCharacterName 时可回退到 getCharacter 校验角色存在', async () => {
+    const g = globalThis as MutableGlobal;
+    g.getCharacter = vi.fn().mockResolvedValue({ name: '角色E' });
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书E', additional: [] });
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
+    await expect(resolver.resolve('charPrimary', '')).resolves.toBe('主书E');
+  });
+
+  it('角色校验 API 全缺失时，char 模式应拒绝拉取', async () => {
+    const g = globalThis as MutableGlobal;
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: null, additional: [] });
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
+    await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未找到当前打开的角色卡');
   });
 
   it('managed 模式会在未绑定时创建并回绑', async () => {
