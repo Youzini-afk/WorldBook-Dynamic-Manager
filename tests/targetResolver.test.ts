@@ -50,33 +50,28 @@ describe('TargetBookResolver', () => {
     await expect(resolver.resolve('global', '不存在')).rejects.toThrow('未找到全局世界书');
   });
 
-  it('charPrimary 在 current 角色解析失败时回退到聊天绑定世界书', async () => {
+  it('charPrimary 在未打开角色卡时应报错，不回退到其他世界书', async () => {
     const g = globalThis as MutableGlobal;
     g.getCharWorldbookNames = vi.fn().mockImplementation(() => {
       throw new Error('未找到当前打开的角色卡');
     });
-    g.getChatWorldbookName = vi.fn().mockReturnValue('聊天绑定书');
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('charPrimary', '')).resolves.toBe('聊天绑定书');
+    await expect(resolver.resolve('charPrimary', '')).rejects.toThrow('未找到当前打开的角色卡');
   });
 
-  it('charPrimary 在 current 角色解析失败时回退到可用世界书', async () => {
+  it('charPrimary 会严格返回角色主世界书，不使用手动目标名覆盖', async () => {
     const g = globalThis as MutableGlobal;
-    g.getCharWorldbookNames = vi.fn().mockImplementation(() => {
-      throw new Error('未找到当前打开的角色卡');
-    });
-    g.getWorldbookNames = vi.fn().mockReturnValue(['候选书A', '候选书B']);
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书B', additional: ['附加B'] });
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('charPrimary', '')).resolves.toBe('候选书A');
+    await expect(resolver.resolve('charPrimary', '手动指定书名')).resolves.toBe('主书B');
   });
 
-  it('charPrimary 指定目标书名时直接使用指定值', async () => {
+  it('charAdditional 指定目标书名时必须是当前角色已绑定的附加书', async () => {
     const g = globalThis as MutableGlobal;
-    g.getCharWorldbookNames = vi.fn().mockImplementation(() => {
-      throw new Error('未找到当前打开的角色卡');
-    });
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '主书C', additional: ['附加C1', '附加C2'] });
     const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
-    await expect(resolver.resolve('charPrimary', ' 手动指定书名 ')).resolves.toBe('手动指定书名');
+    await expect(resolver.resolve('charAdditional', '附加C2')).resolves.toBe('附加C2');
+    await expect(resolver.resolve('charAdditional', '不存在附加书')).rejects.toThrow('未绑定指定附加世界书');
   });
 
   it('managed 模式会在未绑定时创建并回绑', async () => {

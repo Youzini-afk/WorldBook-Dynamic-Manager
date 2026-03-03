@@ -3,6 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const dryRun = process.argv.includes('--dry-run');
+const refArg = process.argv.find(item => item.startsWith('--ref='));
+const releaseRef = (refArg ? refArg.slice('--ref='.length) : process.env.WBM_RELEASE_REF || 'main').trim() || 'main';
 
 function createScriptImport({ id, name, content, info }) {
   return {
@@ -39,14 +41,14 @@ async function main() {
   const defaultScript = createScriptImport({
     id: randomUUID(),
     name: '动态世界书-v3',
-    content: `import 'https://gcore.jsdelivr.net/gh/${gh}@main/index.js'`,
-    info: '默认分发地址（gcore jsDelivr）。建议发布后改为固定 tag。',
+    content: `import 'https://gcore.jsdelivr.net/gh/${gh}@${releaseRef}/index.js'`,
+    info: `默认分发地址（gcore jsDelivr），当前固定引用: ${releaseRef}`,
   });
   const cdnScript = createScriptImport({
     id: randomUUID(),
     name: '动态世界书-v3(cdn)',
-    content: `import 'https://cdn.jsdelivr.net/gh/${gh}@main/index.js'`,
-    info: '标准 jsDelivr CDN。建议发布后改为固定 tag。',
+    content: `import 'https://cdn.jsdelivr.net/gh/${gh}@${releaseRef}/index.js'`,
+    info: `标准 jsDelivr CDN，当前固定引用: ${releaseRef}`,
   });
   const inlineScript = createScriptImport({
     id: randomUUID(),

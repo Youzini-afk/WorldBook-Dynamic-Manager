@@ -27,57 +27,34 @@ export class TargetBookResolver {
 
   async resolve(targetType: TargetType, targetBookName: string): Promise<string> {
     const preferred = targetBookName.trim();
-    if (preferred && targetType !== 'global' && targetType !== 'managed') {
-      return preferred;
-    }
 
     if (targetType === 'charPrimary') {
       const bindings = this.tryGetCharBindings();
-      if (bindings?.primary) return bindings.primary;
-
-      const chatBound = this.tryGetChatWorldbookName();
-      if (chatBound) {
-        this.logger.warn('当前角色主世界书不可解析，已回退到聊天绑定世界书');
-        return chatBound;
+      if (!bindings) {
+        throw new Error('未找到当前打开的角色卡，无法解析角色主世界书');
       }
-
-      if (bindings?.additional.length) {
-        this.logger.warn('当前角色主世界书缺失，已回退到附加世界书');
-        return bindings.additional[0];
+      if (!bindings.primary) {
+        throw new Error('当前角色未绑定主世界书');
       }
-
-      const fallback = this.tryGetAnyAvailableWorldbook();
-      if (fallback) {
-        this.logger.warn(`当前角色主世界书不可用，已回退到可用世界书: ${fallback}`);
-        return fallback;
-      }
-
-      throw new Error('当前角色未绑定主世界书，且无法解析可用目标世界书');
+      return bindings.primary;
     }
 
     if (targetType === 'charAdditional') {
-      if (preferred) return preferred;
-
       const bindings = this.tryGetCharBindings();
-      if (bindings?.additional.length) return bindings.additional[0];
-      if (bindings?.primary) {
-        this.logger.warn('当前角色未绑定附加世界书，已回退到主世界书');
-        return bindings.primary;
+      if (!bindings) {
+        throw new Error('未找到当前打开的角色卡，无法解析角色附加世界书');
       }
-
-      const chatBound = this.tryGetChatWorldbookName();
-      if (chatBound) {
-        this.logger.warn('当前角色附加世界书不可解析，已回退到聊天绑定世界书');
-        return chatBound;
+      if (bindings.additional.length === 0) {
+        throw new Error('当前角色未绑定附加世界书');
       }
-
-      const fallback = this.tryGetAnyAvailableWorldbook();
-      if (fallback) {
-        this.logger.warn(`当前角色附加世界书不可用，已回退到可用世界书: ${fallback}`);
-        return fallback;
+      if (preferred) {
+        const matched = bindings.additional.find(name => name === preferred);
+        if (!matched) {
+          throw new Error(`当前角色未绑定指定附加世界书: ${preferred}`);
+        }
+        return matched;
       }
-
-      throw new Error('当前角色未绑定附加世界书，且无法解析可用目标世界书');
+      return bindings.additional[0];
     }
 
     if (targetType === 'global') {
