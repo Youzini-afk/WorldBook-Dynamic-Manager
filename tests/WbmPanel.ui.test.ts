@@ -118,7 +118,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
 }
 
 async function clickTab(wrapper: VueWrapper<unknown>, label: string): Promise<void> {
-  const tab = wrapper.findAll('button.tab').find(button => button.text() === label);
+  const tab = wrapper.findAll('button.wbm-tab').find(button => button.text() === label);
   expect(tab, `tab not found: ${label}`).toBeDefined();
   await tab!.trigger('click');
   await flushPromises();
@@ -137,7 +137,7 @@ describe('WbmPanel UI', () => {
     const wrapper = mount(WbmPanel, { props: { bridge } });
     await flushPromises();
 
-    const tabs = wrapper.findAll('button.tab');
+    const tabs = wrapper.findAll('button.wbm-tab');
     expect(tabs).toHaveLength(7);
 
     await clickTab(wrapper, '后台');
@@ -224,10 +224,9 @@ describe('WbmPanel UI', () => {
     await clickButton(wrapper, '全部通过');
 
     expect(wrapper.text()).toContain('全部通过失败');
-    expect(wrapper.find('.error-banner').exists()).toBe(true);
+    expect(wrapper.find('.wbm-error-banner').exists()).toBe(true);
 
     await clickButton(wrapper, '清除');
-    expect(wrapper.find('.error-banner').exists()).toBe(false);
+    expect(wrapper.find('.wbm-error-banner').exists()).toBe(false);
   });
 });
-
