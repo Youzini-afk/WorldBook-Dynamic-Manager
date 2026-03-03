@@ -60,13 +60,26 @@
         <div class="wbm-card">
           <label>审核深度</label>
           <input v-model.number="config.reviewDepth" type="number" min="1" max="100" />
-          <label>删除确认</label>
-          <input v-model="config.confirmDelete" type="checkbox" />
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">删除确认</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.confirmDelete }"
+              :aria-pressed="config.confirmDelete ? 'true' : 'false'"
+              @click="config.confirmDelete = !config.confirmDelete"
+            >
+              <span class="wbm-switch-track">
+                <span class="wbm-switch-thumb"></span>
+              </span>
+              <span class="wbm-switch-text">{{ config.confirmDelete ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
           <label>日志级别</label>
           <select v-model="config.logLevel">
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
+            <option value="info">信息（info）</option>
+            <option value="warn">警告（warn）</option>
+            <option value="error">错误（error）</option>
           </select>
           <div class="wbm-row">
             <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存设置</button>
@@ -78,19 +91,19 @@
         <div class="wbm-card">
           <label>运行模式</label>
           <select v-model="config.mode">
-            <option value="inline">inline</option>
-            <option value="external">external</option>
+            <option value="inline">内置模式（inline）</option>
+            <option value="external">外部接口（external）</option>
           </select>
           <label>API 来源</label>
           <select v-model="config.apiSource">
-            <option value="tavern">tavern</option>
-            <option value="custom">custom</option>
+            <option value="tavern">酒馆内置（tavern）</option>
+            <option value="custom">自定义来源（custom）</option>
           </select>
-          <label>外部 Endpoint</label>
+          <label>外部接口地址</label>
           <input v-model="config.externalEndpoint" />
-          <label>外部模型</label>
+          <label>外部模型名称</label>
           <input v-model="config.externalModel" />
-          <label>外部密钥</label>
+          <label>外部 API 密钥</label>
           <input v-model="config.externalApiKey" />
           <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存 API</button>
         </div>
@@ -98,32 +111,45 @@
 
       <section v-else-if="activeTab === 3" key="pane-scheduler" class="wbm-pane">
         <div class="wbm-card">
-          <label>自动审核</label>
-          <input v-model="config.autoEnabled" type="checkbox" />
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">自动审核</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.autoEnabled }"
+              :aria-pressed="config.autoEnabled ? 'true' : 'false'"
+              @click="config.autoEnabled = !config.autoEnabled"
+            >
+              <span class="wbm-switch-track">
+                <span class="wbm-switch-thumb"></span>
+              </span>
+              <span class="wbm-switch-text">{{ config.autoEnabled ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
           <label>起始楼层</label>
           <input v-model.number="config.startAfter" type="number" min="0" />
           <label>间隔</label>
           <input v-model.number="config.interval" type="number" min="-1" />
           <label>触发时机</label>
           <select v-model="config.triggerTiming">
-            <option value="before">before</option>
-            <option value="after">after</option>
-            <option value="both">both</option>
+            <option value="before">发送前（before）</option>
+            <option value="after">发送后（after）</option>
+            <option value="both">前后都触发（both）</option>
           </select>
           <label>目标世界书类型</label>
           <select v-model="config.targetType">
-            <option value="charPrimary">charPrimary</option>
-            <option value="charAdditional">charAdditional</option>
-            <option value="global">global</option>
-            <option value="managed">managed</option>
+            <option value="charPrimary">角色主世界书（charPrimary）</option>
+            <option value="charAdditional">角色附加世界书（charAdditional）</option>
+            <option value="global">全局世界书（global）</option>
+            <option value="managed">聊天托管世界书（managed）</option>
           </select>
           <label>目标世界书名</label>
           <input v-model="config.targetBookName" />
           <label>审核模式</label>
           <select v-model="config.approvalMode">
-            <option value="auto">auto</option>
-            <option value="manual">manual</option>
-            <option value="selective">selective</option>
+            <option value="auto">自动执行（auto）</option>
+            <option value="manual">手动审核（manual）</option>
+            <option value="selective">选择性审核（selective）</option>
           </select>
           <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存调度</button>
         </div>
@@ -134,7 +160,7 @@
           <div>目标世界书: {{ status.targetBookName || '(未解析)' }}</div>
           <div>自动审核: {{ status.autoEnabled ? '开启' : '关闭' }}</div>
           <div>处理状态: {{ status.processing ? '处理中' : '空闲' }}</div>
-          <div>审核模式: {{ status.approvalMode }}</div>
+          <div>审核模式: {{ formatApprovalMode(status.approvalMode) }}</div>
           <div>待审队列: {{ status.queueSize }}</div>
           <div>下一触发楼层: {{ status.nextDueFloor }}</div>
           <button class="wbm-btn" @click="refreshStatus">刷新状态</button>
@@ -157,8 +183,8 @@
         <div class="wbm-card">
           <strong>快照</strong>
           <div class="wbm-row">
-            <input v-model.number="rollbackFloorInput" type="number" min="0" placeholder="floor" />
-            <input v-model="rollbackChatIdInput" placeholder="chatId(可选)" />
+            <input v-model.number="rollbackFloorInput" type="number" min="0" placeholder="楼层 floor" />
+            <input v-model="rollbackChatIdInput" placeholder="聊天 ID（可选）" />
             <button class="wbm-btn wbm-btn-mini" @click="rollbackFloor">按楼层回滚</button>
           </div>
           <div v-for="item in snapshots" :key="item.id" class="wbm-item is-small">
@@ -222,6 +248,13 @@ const logsText = computed(() =>
     .map(item => `[${item.time}] [${item.level}] [${item.namespace}] ${item.message}`)
     .join('\n'),
 );
+
+function formatApprovalMode(value: string): string {
+  if (value === 'auto') return '自动执行（auto）';
+  if (value === 'manual') return '手动审核（manual）';
+  if (value === 'selective') return '选择性审核（selective）';
+  return value;
+}
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -733,6 +766,77 @@ onBeforeUnmount(() => {
   min-height: 18px;
   padding: 0;
   border-radius: 6px;
+}
+.wbm-switch-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 0;
+}
+.wbm-switch-label {
+  color: var(--wbm-text-sub);
+  font-weight: 600;
+}
+.wbm-switch {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 999px;
+}
+.wbm-switch-track {
+  position: relative;
+  width: 52px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 170, 0.24);
+  background: rgba(35, 29, 24, 0.86);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+  transition:
+    background-color 160ms var(--wbm-ease),
+    border-color 160ms var(--wbm-ease),
+    box-shadow 160ms var(--wbm-ease);
+}
+.wbm-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #f4efe8, #d7c8b8);
+  box-shadow:
+    0 4px 10px rgba(0, 0, 0, 0.34),
+    inset 0 1px 1px rgba(255, 255, 255, 0.28);
+  transition: transform 180ms var(--wbm-ease);
+}
+.wbm-switch-text {
+  min-width: 30px;
+  color: var(--wbm-text-sub);
+  font-weight: 600;
+  text-align: right;
+}
+.wbm-switch.is-on .wbm-switch-track {
+  border-color: rgba(232, 183, 132, 0.56);
+  background: linear-gradient(135deg, rgba(232, 183, 132, 0.96), rgba(208, 154, 102, 0.9));
+  box-shadow:
+    0 0 0 1px rgba(232, 183, 132, 0.18),
+    0 8px 16px rgba(208, 154, 102, 0.28);
+}
+.wbm-switch.is-on .wbm-switch-thumb {
+  transform: translateX(22px);
+  background: linear-gradient(135deg, #fff6eb, #f0e0cd);
+}
+.wbm-switch.is-on .wbm-switch-text {
+  color: var(--wbm-text-main);
+}
+.wbm-switch:focus-visible .wbm-switch-track {
+  box-shadow:
+    0 0 0 2px rgba(232, 183, 132, 0.22),
+    0 0 0 5px rgba(208, 154, 102, 0.14);
 }
 .wbm-btn {
   display: inline-flex;

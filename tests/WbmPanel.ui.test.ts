@@ -200,8 +200,8 @@ describe('WbmPanel UI', () => {
     expect(bridge.approveAll).toHaveBeenCalledTimes(1);
     expect(bridge.rejectAll).toHaveBeenCalledTimes(1);
 
-    await wrapper.find('input[placeholder="floor"]').setValue('18');
-    await wrapper.find('input[placeholder="chatId(可选)"]').setValue('chat-x');
+    await wrapper.find('input[placeholder="楼层 floor"]').setValue('18');
+    await wrapper.find('input[placeholder="聊天 ID（可选）"]').setValue('chat-x');
     await clickButton(wrapper, '按楼层回滚');
     expect(bridge.rollbackFloor).toHaveBeenCalledWith(18, 'chat-x');
 
