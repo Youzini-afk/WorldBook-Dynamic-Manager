@@ -179,6 +179,62 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       }
       return source.length;
     }),
+    exportApiPresets: vi.fn(() => JSON.stringify(apiPresets, null, 2)),
+    importApiPresets: vi.fn((payload: string) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        return 0;
+      }
+      const source = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { presets?: unknown[] }).presets)
+          ? (parsed as { presets: unknown[] }).presets
+          : [];
+      if (source.length === 0) return 0;
+      for (const raw of source) {
+        const item = raw as Partial<ApiPreset>;
+        if (!item || typeof item.name !== 'string') continue;
+        const next: ApiPreset = {
+          id: item.id ?? `api-${apiPresets.length + 1}`,
+          name: item.name,
+          config: { ...apiConfig, ...(item.config ?? {}) },
+          createdAt: item.createdAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        apiPresets = [...apiPresets.filter(preset => preset.id !== next.id), next];
+      }
+      return source.length;
+    }),
+    exportPromptPresets: vi.fn(() => JSON.stringify(promptPresets, null, 2)),
+    importPromptPresets: vi.fn((payload: string) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        return 0;
+      }
+      const source = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { presets?: unknown[] }).presets)
+          ? (parsed as { presets: unknown[] }).presets
+          : [];
+      if (source.length === 0) return 0;
+      for (const raw of source) {
+        const item = raw as Partial<PromptPreset>;
+        if (!item || typeof item.name !== 'string') continue;
+        const next: PromptPreset = {
+          id: item.id ?? `prompt-${promptPresets.length + 1}`,
+          name: item.name,
+          entries: Array.isArray(item.entries) ? [...item.entries] : [],
+          createdAt: item.createdAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        promptPresets = [...promptPresets.filter(preset => preset.id !== next.id), next];
+      }
+      return source.length;
+    }),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     listLockedNames: vi.fn(() => [...lockedNames]),
     setEntryLocked: vi.fn(async (uid: number | string, locked: boolean) => {

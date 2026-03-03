@@ -34,6 +34,10 @@ export interface PanelBridge {
   deleteGlobalPreset(id: string): Promise<boolean> | boolean;
   exportGlobalPresets(): string;
   importGlobalPresets(payload: string): Promise<number> | number;
+  exportApiPresets(): string;
+  importApiPresets(payload: string): Promise<number> | number;
+  exportPromptPresets(): string;
+  importPromptPresets(payload: string): Promise<number> | number;
   listAiManagedNames(): string[];
   listLockedNames(): string[];
   setEntryLocked(uid: number | string, locked: boolean): Promise<void>;

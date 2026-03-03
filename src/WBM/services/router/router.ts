@@ -44,6 +44,7 @@ export interface RouterExecutionOptions {
   chatId?: string;
   confirmUpdate?: boolean;
   maxCreatePerRound?: number;
+  patchDuplicateGuard?: boolean;
 }
 
 export class CommandRouter {
@@ -66,6 +67,7 @@ export class CommandRouter {
     const chatId = options.chatId;
     const confirmUpdate = options.confirmUpdate ?? false;
     const maxCreatePerRound = options.maxCreatePerRound ?? 0;
+    const patchDuplicateGuard = options.patchDuplicateGuard ?? true;
 
     if (approvalMode === 'manual') {
       const queued = this.enqueueCommands(commands, bookName, source, floor, chatId);
@@ -116,7 +118,7 @@ export class CommandRouter {
       }
 
       try {
-        const result = await this.executeOne(command, bookName, floor, chatId);
+        const result = await this.executeOne(command, bookName, floor, chatId, patchDuplicateGuard);
         if (command.action === 'create' && result.status === 'ok') {
           createCount++;
         }
@@ -179,6 +181,7 @@ export class CommandRouter {
     bookName: string,
     floor?: number,
     chatId?: string,
+    patchDuplicateGuard = true,
   ): Promise<RouterResult> {
     const entries = await this.repository.getEntries(bookName);
     const target = findByName(entries, command.entry_name);
@@ -221,7 +224,9 @@ export class CommandRouter {
     }
 
     const next = { ...target, ...command.fields };
-    const patchResult = this.patchProcessor.apply(next, command.ops);
+    const patchResult = this.patchProcessor.apply(next, command.ops, {
+      duplicateGuard: patchDuplicateGuard,
+    });
     if (patchResult.applied === 0 && patchResult.errors.length > 0) {
       return {
         action: 'patch',

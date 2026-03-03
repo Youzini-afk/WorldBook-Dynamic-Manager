@@ -313,6 +313,17 @@
             <button class="wbm-btn" @click="applyPromptPreset">应用</button>
             <button class="wbm-btn wbm-btn-danger" @click="deletePromptPreset">删除</button>
           </div>
+          <div class="wbm-row">
+            <button class="wbm-btn wbm-btn-mini" @click="exportPromptPresets">导出预设</button>
+            <button class="wbm-btn wbm-btn-mini" @click="triggerImportPromptPresets">导入预设</button>
+            <input
+              ref="importPromptPresetInputRef"
+              type="file"
+              accept=".json,application/json"
+              style="display: none"
+              @change="onImportPromptPresetsFileChange"
+            />
+          </div>
         </div>
       </section>
 
@@ -367,6 +378,17 @@
             </select>
             <button class="wbm-btn" @click="applyApiPreset">应用</button>
             <button class="wbm-btn wbm-btn-danger" @click="deleteApiPreset">删除</button>
+          </div>
+          <div class="wbm-row">
+            <button class="wbm-btn wbm-btn-mini" @click="exportApiPresets">导出预设</button>
+            <button class="wbm-btn wbm-btn-mini" @click="triggerImportApiPresets">导入预设</button>
+            <input
+              ref="importApiPresetInputRef"
+              type="file"
+              accept=".json,application/json"
+              style="display: none"
+              @change="onImportApiPresetsFileChange"
+            />
           </div>
         </div>
       </section>
@@ -457,6 +479,115 @@
             >
               <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
               <span class="wbm-switch-text">{{ config.syncOnDelete ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <label>刷新模式</label>
+          <select v-model="config.refreshMode">
+            <option value="full">完整刷新（full）</option>
+            <option value="minimal">最小刷新（minimal）</option>
+          </select>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">Patch 重复保护</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.patchDuplicateGuard }"
+              :aria-pressed="config.patchDuplicateGuard ? 'true' : 'false'"
+              @click="config.patchDuplicateGuard = !config.patchDuplicateGuard"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.patchDuplicateGuard ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">悬浮入口按钮</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.fabEnabled }"
+              :aria-pressed="config.fabEnabled ? 'true' : 'false'"
+              @click="config.fabEnabled = !config.fabEnabled"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.fabEnabled ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">发送用户消息</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.sendUserMessages }"
+              :aria-pressed="config.sendUserMessages ? 'true' : 'false'"
+              @click="config.sendUserMessages = !config.sendUserMessages"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.sendUserMessages ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">发送 AI 消息</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.sendAiMessages }"
+              :aria-pressed="config.sendAiMessages ? 'true' : 'false'"
+              @click="config.sendAiMessages = !config.sendAiMessages"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.sendAiMessages ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">提示词排除常量条目</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.excludeConstantFromPrompt }"
+              :aria-pressed="config.excludeConstantFromPrompt ? 'true' : 'false'"
+              @click="config.excludeConstantFromPrompt = !config.excludeConstantFromPrompt"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.excludeConstantFromPrompt ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">仅直接命中条目</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.directTriggerOnly }"
+              :aria-pressed="config.directTriggerOnly ? 'true' : 'false'"
+              @click="config.directTriggerOnly = !config.directTriggerOnly"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.directTriggerOnly ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">更新后自动验证</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.autoVerifyAfterUpdate }"
+              :aria-pressed="config.autoVerifyAfterUpdate ? 'true' : 'false'"
+              @click="config.autoVerifyAfterUpdate = !config.autoVerifyAfterUpdate"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.autoVerifyAfterUpdate ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">Token 估算</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.tokenEstimateEnabled }"
+              :aria-pressed="config.tokenEstimateEnabled ? 'true' : 'false'"
+              @click="config.tokenEstimateEnabled = !config.tokenEstimateEnabled"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.tokenEstimateEnabled ? '开启' : '关闭' }}</span>
             </button>
           </div>
           <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存调度</button>
@@ -767,6 +898,8 @@ const importTargetBookName = ref('');
 const importConflictPolicy = ref<ImportConflictPolicy>('overwrite');
 const importFileInputRef = ref<HTMLInputElement | null>(null);
 const importGlobalPresetInputRef = ref<HTMLInputElement | null>(null);
+const importApiPresetInputRef = ref<HTMLInputElement | null>(null);
+const importPromptPresetInputRef = ref<HTMLInputElement | null>(null);
 
 const findQuery = ref('');
 const replaceText = ref('');
@@ -1184,6 +1317,8 @@ async function refreshStatus(): Promise<void> {
       if (!worldbookOptions.value.includes(resolvedTarget)) {
         worldbookOptions.value = [resolvedTarget, ...worldbookOptions.value];
       }
+    } else if (!resolvedTarget && !hasDraftChanges.value) {
+      selectedWorldbookName.value = '';
     }
     if (resolvedTarget && !importTargetBookName.value) {
       importTargetBookName.value = resolvedTarget;
@@ -1213,8 +1348,7 @@ async function refreshWorldbookOptions(): Promise<void> {
   const next = await runData('刷新可选世界书', () => props.bridge.listWorldbookNames(config.targetType));
   if (next == null) return;
   const resolved = status.value.targetBookName?.trim() ?? '';
-  const configured = config.targetBookName.trim();
-  const preferred = resolved || configured;
+  const preferred = resolved;
   const current = selectedWorldbookName.value.trim();
   const dedup = new Set<string>();
   const normalized = next
@@ -1225,14 +1359,17 @@ async function refreshWorldbookOptions(): Promise<void> {
       dedup.add(item);
       return true;
     });
-  if (preferred && !dedup.has(preferred)) normalized.unshift(preferred);
+  if (preferred && !dedup.has(preferred)) {
+    normalized.unshift(preferred);
+    dedup.add(preferred);
+  }
   worldbookOptions.value = normalized;
   if (hasDraftChanges.value) return;
   if (current && dedup.has(current)) {
     selectedWorldbookName.value = current;
     return;
   }
-  selectedWorldbookName.value = preferred || normalized[0] || '';
+  selectedWorldbookName.value = preferred || '';
 }
 
 async function refreshGlobalBindings(): Promise<void> {
@@ -1733,6 +1870,35 @@ async function deleteApiPreset(): Promise<void> {
   await refreshApiPresets();
 }
 
+async function exportApiPresets(): Promise<void> {
+  await runVoid('导出 API 预设', () => {
+    const raw = props.bridge.exportApiPresets();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadJsonFile(`wbm3-api-presets-${stamp}.json`, raw);
+  });
+}
+
+function triggerImportApiPresets(): void {
+  importApiPresetInputRef.value?.click();
+}
+
+async function onImportApiPresetsFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const imported = await runData('导入 API 预设', async () => {
+    const raw = await readFileAsText(file);
+    return await props.bridge.importApiPresets(raw);
+  });
+  if (imported == null) return;
+  if (imported <= 0) {
+    setError('导入 API 预设', '未导入任何预设（文件为空或格式不正确）');
+    return;
+  }
+  await refreshApiPresets();
+}
+
 async function saveCurrentPromptPreset(): Promise<void> {
   const presetName = newPromptPresetName.value.trim();
   if (!presetName) return;
@@ -1761,6 +1927,35 @@ async function deletePromptPreset(): Promise<void> {
   });
   if (!ok) return;
   if (selectedPromptPresetId.value === deletingId) selectedPromptPresetId.value = '';
+  await refreshPromptPresets();
+}
+
+async function exportPromptPresets(): Promise<void> {
+  await runVoid('导出提示词预设', () => {
+    const raw = props.bridge.exportPromptPresets();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadJsonFile(`wbm3-prompt-presets-${stamp}.json`, raw);
+  });
+}
+
+function triggerImportPromptPresets(): void {
+  importPromptPresetInputRef.value?.click();
+}
+
+async function onImportPromptPresetsFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const imported = await runData('导入提示词预设', async () => {
+    const raw = await readFileAsText(file);
+    return await props.bridge.importPromptPresets(raw);
+  });
+  if (imported == null) return;
+  if (imported <= 0) {
+    setError('导入提示词预设', '未导入任何预设（文件为空或格式不正确）');
+    return;
+  }
   await refreshPromptPresets();
 }
 

@@ -142,9 +142,18 @@ describe('TargetBookResolver', () => {
     await expect(resolver.resolve('global', '')).rejects.toThrow('全局世界书查询接口不可用');
   });
 
-  it('managed 接口缺失但有指定名称时直接返回指定值', async () => {
-    const resolver = new TargetBookResolver(noopLogger, {} satisfies RuntimeWorldbookApi);
-    await expect(resolver.resolve('managed', '托管直连')).resolves.toBe('托管直连');
+  it('managed strict 策略下，即使有配置名也不允许回退', async () => {
+    const g = globalThis as MutableGlobal;
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '角色主书', additional: ['附加书'] });
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
+    await expect(resolver.resolve('managed', '托管直连', 'strict')).rejects.toThrow('strict 策略禁止回退');
+  });
+
+  it('managed fallback 策略会忽略配置名并回退角色主世界书', async () => {
+    const g = globalThis as MutableGlobal;
+    g.getCharWorldbookNames = vi.fn().mockReturnValue({ primary: '角色主书', additional: ['附加书'] });
+    const resolver = new TargetBookResolver(noopLogger, g as RuntimeWorldbookApi);
+    await expect(resolver.resolve('managed', '托管直连', 'fallback')).resolves.toBe('角色主书');
   });
 
   it('managed 接口缺失时回退到角色主世界书', async () => {

@@ -257,24 +257,21 @@ export class TargetBookResolver {
       };
     }
 
-    if (preferred) {
-      this.logger.warn('托管模式接口不可用，使用配置中的目标世界书名');
-      return {
-        bookName: preferred,
-        resolvedBy: 'managed_preferred',
-        fallbackUsed: false,
-      };
-    }
-
     if (managedFallbackPolicy === 'strict') {
       if (!hasCharacter) {
         throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
+      }
+      if (preferred) {
+        this.logger.warn(`strict 模式下忽略配置目标世界书名: ${preferred}`);
       }
       throw new Error('托管模式接口不可用，且 strict 策略禁止回退世界书');
     }
 
     if (!hasCharacter) {
       throw new Error('未找到当前打开的角色卡，托管模式无法解析世界书');
+    }
+    if (preferred) {
+      this.logger.warn(`托管接口不可用，fallback 模式忽略配置目标世界书名: ${preferred}`);
     }
 
     const bindings = this.tryGetCharBindings();

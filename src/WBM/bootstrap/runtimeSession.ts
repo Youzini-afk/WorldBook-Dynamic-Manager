@@ -306,6 +306,39 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     };
   }
 
+  const refreshPanel = (reason: 'interactive' | 'background' = 'interactive'): void => {
+    if (config.refreshMode === 'minimal' && reason === 'background') return;
+    panel.refresh();
+  };
+
+  const mountLauncher = (): void => {
+    if (launcher || config.fabEnabled === false) return;
+    launcher = new MagicWandLauncher(logger, {
+      label: '动态世界书',
+      onToggle: open => {
+        if (open) {
+          panel.open();
+          return;
+        }
+        panel.close();
+      },
+    });
+    launcher.init();
+  };
+
+  const unmountLauncher = (): void => {
+    launcher?.destroy();
+    launcher = null;
+  };
+
+  const syncLauncherState = (): void => {
+    if (config.fabEnabled === false) {
+      unmountLauncher();
+      return;
+    }
+    mountLauncher();
+  };
+
   const getStatus = (): WbmStatus => ({
     autoEnabled: config.autoEnabled,
     processing,
@@ -423,8 +456,14 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
           logger.warn('读取聊天托管世界书失败', error);
         }
       }
-      if (typeof runtime.worldbook.getWorldbookNames === 'function') {
-        pushList(runtime.worldbook.getWorldbookNames());
+      if (config.managedFallbackPolicy === 'fallback' && typeof runtime.worldbook.getCharWorldbookNames === 'function') {
+        try {
+          const bindings = runtime.worldbook.getCharWorldbookNames('current');
+          pushName(bindings?.primary);
+          pushList(bindings?.additional);
+        } catch (error) {
+          logger.warn('读取托管回退候选世界书失败', error);
+        }
       }
       return Array.from(dedup);
     }
@@ -468,7 +507,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
     await runtime.worldbook.rebindGlobalWorldbooks(next);
     logger.info(`已更新全局世界书绑定: ${next.length} 本`);
-    panel.refresh();
+    refreshPanel();
     return getGlobalWorldbooks();
   };
 
@@ -495,7 +534,29 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     const imported = globalPresetManager.importAll(payload);
     if (imported > 0) {
       logger.info(`全局预设导入完成: ${imported} 条`);
-      panel.refresh();
+      refreshPanel();
+    }
+    return imported;
+  };
+
+  const exportApiPresets = (): string => apiPresetManager.exportAll();
+
+  const importApiPresets = (payload: string): number => {
+    const imported = apiPresetManager.importAll(payload);
+    if (imported > 0) {
+      logger.info(`API 预设导入完成: ${imported} 条`);
+      refreshPanel();
+    }
+    return imported;
+  };
+
+  const exportPromptPresets = (): string => promptPresetManager.exportAll();
+
+  const importPromptPresets = (payload: string): number => {
+    const imported = promptPresetManager.importAll(payload);
+    if (imported > 0) {
+      logger.info(`提示词预设导入完成: ${imported} 条`);
+      refreshPanel();
     }
     return imported;
   };
@@ -572,7 +633,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
     await repository.replaceEntries(target, nextEntries);
     logger.info(`世界书导入完成: ${target} strategy=${strategy} imported=${imported} skipped=${skipped} renamed=${renamed}`);
-    panel.refresh();
+    refreshPanel();
     return {
       bookName: target,
       strategy,
@@ -624,6 +685,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       chatId?: string;
       confirmUpdate: boolean;
       maxCreatePerRound: number;
+      patchDuplicateGuard: boolean;
     },
   ): Promise<RouterResult[]> => {
     const { executable, lockedResults } = splitLockedCommands(commands, bookName);
@@ -648,6 +710,19 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     return matched;
   };
 
+  const saveRuntimeSnapshot = async (bookName: string, reason: string): Promise<void> => {
+    const entries = await repository.getEntries(bookName);
+    snapshots.save({
+      id: `snapshot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      bookName,
+      createdAt: new Date().toISOString(),
+      reason,
+      entries,
+      floor: lastObservedFloor,
+      chatId: activeChatId || undefined,
+    });
+  };
+
   const executeReview = async (
     bookName: string,
     messages: ChatMessage[],
@@ -663,7 +738,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       return;
     }
     processing = true;
-    panel.refresh();
+    refreshPanel(source === 'auto' ? 'background' : 'interactive');
 
     const startedAt = Date.now();
     let promptPreview = '';
@@ -693,9 +768,11 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         contentFilterTags: config.contentFilterTags,
         maxContentChars: config.maxContentChars,
         excludeConstantFromPrompt: config.excludeConstantFromPrompt,
+        directTriggerOnly: config.directTriggerOnly,
         sendUserMessages: config.sendUserMessages,
         sendAiMessages: config.sendAiMessages,
         scanText: contextScanner.buildScanText(messages, config.reviewDepth),
+        promptEntries: promptEntryManager.list(),
       });
 
       promptMessages = trace.prompts;
@@ -712,6 +789,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         chatId: activeChatId || undefined,
         confirmUpdate: config.confirmUpdate,
         maxCreatePerRound: config.maxCreatePerRound,
+        patchDuplicateGuard: config.patchDuplicateGuard,
       });
       executionResults = results;
 
@@ -779,13 +857,12 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     } finally {
       processing = false;
       scheduler.unlock();
-      panel.refresh();
+      refreshPanel(source === 'auto' ? 'background' : 'interactive');
     }
   };
 
   const runAutoReview = async (timing: 'before' | 'after', floor: number): Promise<void> => {
     if (!config.autoEnabled) return;
-    if (config.directTriggerOnly) return;
     if (!scheduler.shouldTrigger(timing, floor)) return;
 
     try {
@@ -794,7 +871,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       await executeReview(target, messages, 'auto', floor);
       lastObservedFloor = floor;
       scheduler.markProcessed(floor);
-      panel.refresh();
+      refreshPanel('background');
     } catch (error) {
       logger.error(`自动审核失败: timing=${timing} floor=${floor}`, error);
     }
@@ -806,6 +883,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     getApiConfig: () => ({ ...apiConfig }),
     saveConfig: async next => {
       const normalized = parseConfig(next);
+      const prevFabEnabled = config.fabEnabled;
       Object.assign(config, normalized);
       targetBookName = config.targetBookName;
       resolvedBy = 'config';
@@ -824,7 +902,10 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       rebuildReviewService();
       snapshots.setRetention(config.snapshotRetention);
       backupManager.setRetention(config.snapshotRetention);
-      panel.refresh();
+      if (prevFabEnabled !== config.fabEnabled) {
+        syncLauncherState();
+      }
+      refreshPanel();
     },
     saveApiConfig: async next => {
       Object.assign(apiConfig, next);
@@ -834,7 +915,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       saveApiConfig(apiConfig, storage ?? undefined);
       saveConfig(config, storage ?? undefined);
       rebuildReviewService();
-      panel.refresh();
+      refreshPanel();
     },
     listEntries: async () => {
       const target = await resolveBookName();
@@ -849,6 +930,10 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     deleteGlobalPreset: async id => deleteGlobalPreset(id),
     exportGlobalPresets: () => exportGlobalPresets(),
     importGlobalPresets: async payload => importGlobalPresets(payload),
+    exportApiPresets: () => exportApiPresets(),
+    importApiPresets: async payload => importApiPresets(payload),
+    exportPromptPresets: () => exportPromptPresets(),
+    importPromptPresets: async payload => importPromptPresets(payload),
     listAiManagedNames: () => {
       if (!targetBookName) return [];
       return aiRegistry.list(targetBookName).map(item => item.entryName);
@@ -865,7 +950,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (!entryName) throw new Error('未找到待锁定条目');
       if (locked) entryLocks.lock(target, entryName);
       else entryLocks.unlock(target, entryName);
-      panel.refresh();
+      refreshPanel();
     },
     batchSetEnabled: async (uids, enabled) => await batchSetEnabled(await resolveBookName(), uids, enabled),
     batchDeleteEntries: async uids => await batchDeleteEntries(await resolveBookName(), uids),
@@ -875,8 +960,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (entryName && isLockedEntry(target, entryName)) {
         throw new Error(`条目已锁定，禁止写入: ${entryName}`);
       }
+      await saveRuntimeSnapshot(target, `manual:create:${entryName || '(unnamed)'}`);
       await repository.addEntry(target, fields);
-      panel.refresh();
+      refreshPanel();
     },
     updateEntry: async entry => {
       const target = await resolveBookName();
@@ -887,6 +973,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (beforeName && isLockedEntry(target, beforeName)) {
         throw new Error(`条目已锁定，禁止更新: ${beforeName}`);
       }
+      await saveRuntimeSnapshot(target, `manual:update:${beforeName || getEntryDisplayName(entry) || '(unnamed)'}`);
       await repository.updateEntry(target, entry);
       const afterName = getEntryDisplayName(entry);
       if (
@@ -898,7 +985,15 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         entryLocks.unlock(target, beforeName);
         entryLocks.lock(target, afterName);
       }
-      panel.refresh();
+      if (
+        config.aiRegistryEnabled &&
+        beforeName &&
+        afterName &&
+        normalizeEntryName(beforeName) !== normalizeEntryName(afterName)
+      ) {
+        aiRegistry.rename(target, beforeName, afterName);
+      }
+      refreshPanel();
     },
     deleteEntry: async uid => {
       const target = await resolveBookName();
@@ -908,12 +1003,13 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (entryName && isLockedEntry(target, entryName)) {
         throw new Error(`条目已锁定，禁止删除: ${entryName}`);
       }
+      await saveRuntimeSnapshot(target, `manual:delete:${entryName || String(uid)}`);
       await repository.deleteEntry(target, uid);
       if (entryName) {
         if (config.aiRegistryEnabled) aiRegistry.unmark(target, entryName);
         entryLocks.unlock(target, entryName);
       }
-      panel.refresh();
+      refreshPanel();
     },
     manualReview: async () => {
       await api.manualReview();
@@ -935,7 +1031,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     listPromptEntries: () => promptEntryManager.list(),
     savePromptEntries: async entries => {
       promptEntryManager.replace(entries);
-      panel.refresh();
+      refreshPanel();
     },
     listApiPresets: () => apiPresetManager.list(),
     saveCurrentAsApiPreset: async name => {
@@ -949,7 +1045,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       );
       config.activeApiPreset = preset.id;
       saveConfig(config, storage ?? undefined);
-      panel.refresh();
+      refreshPanel();
     },
     applyApiPreset: async id => {
       const preset = apiPresetManager.get(id);
@@ -962,7 +1058,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       saveApiConfig(apiConfig, storage ?? undefined);
       saveConfig(config, storage ?? undefined);
       rebuildReviewService();
-      panel.refresh();
+      refreshPanel();
     },
     deleteApiPreset: async id => {
       apiPresetManager.remove(id);
@@ -970,7 +1066,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         config.activeApiPreset = '';
         saveConfig(config, storage ?? undefined);
       }
-      panel.refresh();
+      refreshPanel();
     },
     listPromptPresets: () => promptPresetManager.list(),
     saveCurrentAsPromptPreset: async name => {
@@ -980,7 +1076,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const preset = promptPresetManager.upsert(presetName, promptEntryManager.list(), maybeActive?.id);
       config.activePromptPreset = preset.id;
       saveConfig(config, storage ?? undefined);
-      panel.refresh();
+      refreshPanel();
     },
     applyPromptPreset: async id => {
       const preset = promptPresetManager.get(id);
@@ -988,7 +1084,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       promptEntryManager.replace(preset.entries);
       config.activePromptPreset = id;
       saveConfig(config, storage ?? undefined);
-      panel.refresh();
+      refreshPanel();
     },
     deletePromptPreset: async id => {
       promptPresetManager.remove(id);
@@ -996,7 +1092,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         config.activePromptPreset = '';
         saveConfig(config, storage ?? undefined);
       }
-      panel.refresh();
+      refreshPanel();
     },
     rollback: async snapshotId => {
       await api.rollback(snapshotId);
@@ -1031,7 +1127,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     listActivationLogs: () => activationLogs.map(item => ({ ...item })),
     clearActivationLogs: () => {
       activationLogs.splice(0, activationLogs.length);
-      panel.refresh();
+      refreshPanel();
     },
     exportActivationLogs: () =>
       JSON.stringify(
@@ -1052,15 +1148,15 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     getIsolationStats: () => isolation.getStats(targetBookName || undefined),
     clearMyIsolation: async () => {
       isolation.clearMine(targetBookName || undefined);
-      panel.refresh();
+      refreshPanel();
     },
     clearAllIsolation: async () => {
       isolation.clearAll(targetBookName || undefined);
-      panel.refresh();
+      refreshPanel();
     },
     promoteIsolationToGlobal: async () => {
       await api.promoteIsolationToGlobal(targetBookName || undefined);
-      panel.refresh();
+      refreshPanel();
     },
     getLogs: () => [...logs],
     clearLogs: () => {
@@ -1071,18 +1167,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   panel = new VuePanelController(logger, panelBridge, open => {
     launcher?.setActive(open);
   });
-
-  launcher = new MagicWandLauncher(logger, {
-    label: '动态世界书',
-    onToggle: open => {
-      if (open) {
-        panel.open();
-        return;
-      }
-      panel.close();
-    },
-  });
-  launcher.init();
+  syncLauncherState();
 
   repository.logBackend();
   logger.info(`调度器已初始化: nextDue@0=${scheduler.nextDue(0)} version=${version || 'dev'}`);
@@ -1097,8 +1182,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     if (entryName && isLockedEntry(bookName, entryName)) {
       throw new Error(`条目已锁定，禁止写入: ${entryName}`);
     }
+    await saveRuntimeSnapshot(bookName, `manual:create:${entryName || '(unnamed)'}`);
     await repository.addEntry(bookName, fields);
-    panel.refresh();
+    refreshPanel();
   };
 
   const updateEntry = async (bookName: string, entry: WorldbookEntryLike): Promise<void> => {
@@ -1109,6 +1195,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     if (beforeName && isLockedEntry(bookName, beforeName)) {
       throw new Error(`条目已锁定，禁止更新: ${beforeName}`);
     }
+    await saveRuntimeSnapshot(bookName, `manual:update:${beforeName || getEntryDisplayName(entry) || '(unnamed)'}`);
     await repository.updateEntry(bookName, entry);
     const afterName = getEntryDisplayName(entry);
     if (
@@ -1120,7 +1207,15 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       entryLocks.unlock(bookName, beforeName);
       entryLocks.lock(bookName, afterName);
     }
-    panel.refresh();
+    if (
+      config.aiRegistryEnabled &&
+      beforeName &&
+      afterName &&
+      normalizeEntryName(beforeName) !== normalizeEntryName(afterName)
+    ) {
+      aiRegistry.rename(bookName, beforeName, afterName);
+    }
+    refreshPanel();
   };
 
   const deleteEntry = async (bookName: string, uid: number | string): Promise<void> => {
@@ -1130,12 +1225,13 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     if (beforeName && isLockedEntry(bookName, beforeName)) {
       throw new Error(`条目已锁定，禁止删除: ${beforeName}`);
     }
+    await saveRuntimeSnapshot(bookName, `manual:delete:${beforeName || String(uid)}`);
     await repository.deleteEntry(bookName, uid);
     if (beforeName) {
       aiRegistry.unmark(bookName, beforeName);
       entryLocks.unlock(bookName, beforeName);
     }
-    panel.refresh();
+    refreshPanel();
   };
 
   const batchSetEnabled = async (
@@ -1143,6 +1239,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     uids: Array<number | string>,
     enabled: boolean,
   ): Promise<{ updated: number; skipped: number }> => {
+    await saveRuntimeSnapshot(bookName, `manual:batchSetEnabled:${enabled ? 'on' : 'off'}`);
     const entries = await repository.getEntries(bookName);
     const matched = findEntriesByUids(entries, uids);
     let updated = 0;
@@ -1161,7 +1258,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       await repository.updateEntry(bookName, { ...current, enabled });
       updated++;
     }
-    panel.refresh();
+    refreshPanel();
     return { updated, skipped };
   };
 
@@ -1169,6 +1266,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     bookName: string,
     uids: Array<number | string>,
   ): Promise<{ deleted: number; skipped: number }> => {
+    await saveRuntimeSnapshot(bookName, `manual:batchDelete:${uids.length}`);
     const entries = await repository.getEntries(bookName);
     const matched = findEntriesByUids(entries, uids);
     let deleted = 0;
@@ -1196,7 +1294,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       }
       deleted++;
     }
-    panel.refresh();
+    refreshPanel();
     return { deleted, skipped };
   };
 
@@ -1216,10 +1314,22 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     const target = findEntryByName(entries, entryName);
     if (!target) throw new Error(`未找到条目: ${entryName}`);
     const next = { ...target };
-    const result = patchProcessor.apply(next, ops);
+    const result = patchProcessor.apply(next, ops, {
+      duplicateGuard: config.patchDuplicateGuard,
+    });
     if (result.applied > 0) {
+      await saveRuntimeSnapshot(bookName, `manual:patch:${entryName}`);
       await repository.updateEntry(bookName, next);
-      panel.refresh();
+      const afterName = getEntryDisplayName(next);
+      if (
+        config.aiRegistryEnabled &&
+        entryName &&
+        afterName &&
+        normalizeEntryName(entryName) !== normalizeEntryName(afterName)
+      ) {
+        aiRegistry.rename(bookName, entryName, afterName);
+      }
+      refreshPanel();
     }
     return result;
   };
@@ -1232,8 +1342,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       chatId: activeChatId || undefined,
       confirmUpdate: config.confirmUpdate,
       maxCreatePerRound: config.maxCreatePerRound,
+      patchDuplicateGuard: config.patchDuplicateGuard,
     });
-    panel.refresh();
+    refreshPanel();
     return results;
   };
 
@@ -1299,6 +1410,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
           chatId: pending.chatId,
           confirmUpdate: config.confirmUpdate,
           maxCreatePerRound: config.maxCreatePerRound,
+          patchDuplicateGuard: config.patchDuplicateGuard,
         });
         if (config.aiRegistryEnabled) {
           for (const result of results) {
@@ -1308,11 +1420,11 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
           }
         }
       }
-      panel.refresh();
+      refreshPanel();
     },
     rejectQueue: async ids => {
       const rejected = queue.reject(ids);
-      panel.refresh();
+      refreshPanel();
       return rejected;
     },
     rollback: async snapshotId => {
@@ -1320,14 +1432,14 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       if (!snapshot) throw new Error(`未找到快照: ${snapshotId}`);
       await repository.replaceEntries(snapshot.bookName, snapshot.entries);
       logger.info(`已回滚快照: ${snapshotId}`);
-      panel.refresh();
+      refreshPanel();
     },
     rollbackFloor: async (floor, chatId) => {
       const snapshot = snapshots.findLatestByFloor(floor, chatId);
       if (!snapshot) throw new Error(`未找到楼层快照: floor=${floor}${chatId ? ` chatId=${chatId}` : ''}`);
       await repository.replaceEntries(snapshot.bookName, snapshot.entries);
       logger.info(`已按楼层回滚: floor=${floor} snapshot=${snapshot.id}`);
-      panel.refresh();
+      refreshPanel();
     },
     listQueue: () => queue.list(),
     listSnapshots: bookName => snapshots.list(bookName),
@@ -1343,6 +1455,10 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     deleteGlobalPreset,
     exportGlobalPresets,
     importGlobalPresets,
+    exportApiPresets,
+    importApiPresets,
+    exportPromptPresets,
+    importPromptPresets,
     exportWorldbook,
     importWorldbookRaw,
     listLockedEntries: bookName => {
@@ -1398,7 +1514,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     listActivationLogs: () => activationLogs.map(item => ({ ...item })),
     clearActivationLogs: () => {
       activationLogs.splice(0, activationLogs.length);
-      panel.refresh();
+      refreshPanel();
     },
   };
 
@@ -1431,7 +1547,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     scheduler.reset(0);
     lastObservedFloor = 0;
     logger.info(reason);
-    panel.refresh();
+    refreshPanel();
   };
 
   events.on(eventMessageReceived, (...args) => {
@@ -1464,7 +1580,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       scheduler.reset(resetFloor);
       lastObservedFloor = resetFloor;
       logger.info(`消息删除后重置调度状态: floor=${resetFloor}`);
-      panel.refresh();
+      refreshPanel();
     }
   });
   events.on(eventChatChanged, (...args) => {
@@ -1510,7 +1626,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
         source: 'world_info_activated',
       });
     }
-    panel.refresh();
+    refreshPanel();
   });
 
   const legacyShell = buildLegacyShell(api, logger);

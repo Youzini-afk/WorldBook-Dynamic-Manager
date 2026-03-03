@@ -97,4 +97,21 @@ describe('PatchProcessor', () => {
     expect(result.skipped).toBe(25);
     expect(result.errors).toHaveLength(0);
   });
+
+  it('duplicateGuard=false 时允许重复追加', () => {
+    const entry: WorldbookEntryLike = { content: 'A', keys: 'x', secondary_keys: 'y' };
+    const result = processor.apply(
+      entry,
+      [
+        { op: 'append', value: 'A' },
+        { op: 'add_key', value: 'x' },
+        { op: 'add_secondary_key', value: 'y' },
+      ],
+      { duplicateGuard: false },
+    );
+    expect(result.applied).toBe(3);
+    expect(String(entry.content)).toBe('AA');
+    expect(String(entry.keys)).toBe('x,x');
+    expect(String(entry.secondary_keys)).toBe('y,y');
+  });
 });

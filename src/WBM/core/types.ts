@@ -327,6 +327,10 @@ export interface WbmPublicApi {
   deleteGlobalPreset(id: string): boolean;
   exportGlobalPresets(): string;
   importGlobalPresets(payload: string): number;
+  exportApiPresets(): string;
+  importApiPresets(payload: string): number;
+  exportPromptPresets(): string;
+  importPromptPresets(payload: string): number;
   exportWorldbook(bookName?: string): Promise<string>;
   importWorldbookRaw(
     bookName: string,

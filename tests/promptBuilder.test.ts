@@ -109,4 +109,100 @@ describe('ReviewPromptBuilder', () => {
     expect(summary).toContain('世界书摘要');
     expect(triggered).toContain('命中 1/2');
   });
+
+  it('summary 模式不应发送条目全文内容', () => {
+    const builder = new ReviewPromptBuilder();
+    const prompts = builder.build(
+      [{ role: 'user', content: '剧情推进' }],
+      {
+        bookName: 'book-summary',
+        source: 'manual',
+        reviewDepth: 6,
+        contextMode: 'summary',
+        worldbookEntries: [{ uid: 11, name: '设定A', content: '不应出现在 payload 中的全文内容' }],
+      },
+    );
+    const payload = JSON.parse(prompts[2].content) as {
+      worldbook_entries: Array<Record<string, unknown>>;
+    };
+    expect(payload.worldbook_entries).toHaveLength(1);
+    expect(payload.worldbook_entries[0].name).toBe('设定A');
+    expect(payload.worldbook_entries[0].content).toBeUndefined();
+  });
+
+  it('directTriggerOnly=true 仅保留直接命中条目', () => {
+    const builder = new ReviewPromptBuilder();
+    const prompts = builder.build(
+      [{ role: 'user', content: '夜色下出现剑士' }],
+      {
+        bookName: 'book-direct',
+        source: 'auto',
+        reviewDepth: 8,
+        directTriggerOnly: true,
+        scanText: '夜色下出现剑士',
+        worldbookEntries: [
+          { uid: 1, name: '剑士条目', keys: '剑士', content: '命中内容' },
+          { uid: 2, name: '法师条目', keys: '法师', content: '不命中内容' },
+          { uid: 3, name: '常量条目', keys: '常量', content: '常量但未命中', constant: true },
+        ],
+      },
+    );
+    const payload = JSON.parse(prompts[2].content) as {
+      worldbook_entries: Array<Record<string, unknown>>;
+    };
+    expect(payload.worldbook_entries).toHaveLength(1);
+    expect(payload.worldbook_entries[0].name).toBe('剑士条目');
+  });
+
+  it('directTriggerOnly=true 且扫描文本为空时应返回空条目集', () => {
+    const builder = new ReviewPromptBuilder();
+    const prompts = builder.build(
+      [{ role: 'user', content: '消息' }],
+      {
+        bookName: 'book-direct-empty',
+        source: 'auto',
+        reviewDepth: 8,
+        directTriggerOnly: true,
+        scanText: '',
+        worldbookEntries: [
+          { uid: 1, name: '条目A', keys: 'a', content: 'A' },
+          { uid: 2, name: '条目B', keys: 'b', content: 'B' },
+        ],
+      },
+    );
+    const payload = JSON.parse(prompts[2].content) as {
+      worldbook_entries: Array<Record<string, unknown>>;
+    };
+    expect(payload.worldbook_entries).toHaveLength(0);
+  });
+
+  it('启用 PromptEntry 时应按条目拼装提示词', () => {
+    const builder = new ReviewPromptBuilder();
+    const prompts = builder.build(
+      [{ role: 'user', content: '原始消息' }],
+      {
+        bookName: 'book-entry',
+        source: 'manual',
+        reviewDepth: 5,
+        scanText: '原始消息',
+        worldbookEntries: [{ uid: 1, name: '条目A', keys: '原始', content: '内容A' }],
+        promptEntries: [
+          { id: 'sys', name: '系统', role: 'system', content: '系统头', order: 10, enabled: true },
+          {
+            id: 'usr',
+            name: '用户后置',
+            role: 'user',
+            content: '请按模板执行：{worldbook_payload_json}',
+            order: 900,
+            enabled: true,
+          },
+        ],
+      },
+    );
+    expect(prompts.length).toBeGreaterThanOrEqual(3);
+    expect(prompts[0].role).toBe('system');
+    expect(prompts[0].content).toContain('系统头');
+    expect(prompts[prompts.length - 1].role).toBe('user');
+    expect(prompts[prompts.length - 1].content).toContain('"worldbook_name": "book-entry"');
+  });
 });
