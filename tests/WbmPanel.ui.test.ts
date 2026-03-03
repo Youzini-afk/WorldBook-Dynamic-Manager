@@ -2,6 +2,7 @@
 
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_CONFIG } from '../src/WBM/core/config';
 import type {
   PendingReviewItem,
   SnapshotRecord,
@@ -15,21 +16,13 @@ import type { PanelBridge } from '../src/WBM/ui/panel/types';
 
 function makeConfig(): WbmConfig {
   return {
-    mode: 'external',
-    apiSource: 'custom',
+    ...DEFAULT_CONFIG,
     targetType: 'managed',
     targetBookName: 'book-A',
     externalEndpoint: 'https://example.com',
     externalApiKey: 'key',
     externalModel: 'model',
-    startAfter: 3,
-    interval: 5,
-    triggerTiming: 'after',
     approvalMode: 'manual',
-    reviewDepth: 10,
-    autoEnabled: true,
-    confirmDelete: true,
-    logLevel: 'info',
   };
 }
 

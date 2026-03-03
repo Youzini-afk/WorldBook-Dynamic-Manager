@@ -3,7 +3,6 @@ import type { StorageLike } from '../../core/config';
 import { storageKey } from '../../core/config';
 
 const SNAPSHOT_KEY = storageKey('snapshots');
-const MAX_SNAPSHOTS = 100;
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -11,9 +10,21 @@ function clone<T>(value: T): T {
 
 export class SnapshotStore {
   private readonly snapshots: SnapshotRecord[];
+  private retention: number;
 
-  constructor(private readonly storage: StorageLike | null) {
+  constructor(
+    private readonly storage: StorageLike | null,
+    retention = 100,
+  ) {
+    this.retention = Number.isFinite(retention) ? Math.max(1, Math.floor(retention)) : 100;
     this.snapshots = this.load();
+    this.enforceRetention();
+  }
+
+  setRetention(retention: number): void {
+    if (!Number.isFinite(retention)) return;
+    this.retention = Math.max(1, Math.floor(retention));
+    this.enforceRetention();
   }
 
   private load(): SnapshotRecord[] {
@@ -34,12 +45,16 @@ export class SnapshotStore {
     this.storage.setItem(SNAPSHOT_KEY, JSON.stringify(this.snapshots));
   }
 
-  save(snapshot: SnapshotRecord): void {
-    this.snapshots.push(clone(snapshot));
-    if (this.snapshots.length > MAX_SNAPSHOTS) {
-      this.snapshots.splice(0, this.snapshots.length - MAX_SNAPSHOTS);
+  private enforceRetention(): void {
+    if (this.snapshots.length > this.retention) {
+      this.snapshots.splice(0, this.snapshots.length - this.retention);
     }
     this.persist();
+  }
+
+  save(snapshot: SnapshotRecord): void {
+    this.snapshots.push(clone(snapshot));
+    this.enforceRetention();
   }
 
   list(bookName?: string): SnapshotRecord[] {
@@ -60,5 +75,20 @@ export class SnapshotStore {
       return clone(snapshot);
     }
     return null;
+  }
+
+  clear(bookName?: string): number {
+    if (!bookName) {
+      const count = this.snapshots.length;
+      this.snapshots.splice(0, this.snapshots.length);
+      this.persist();
+      return count;
+    }
+
+    const keep = this.snapshots.filter(item => item.bookName !== bookName);
+    const count = this.snapshots.length - keep.length;
+    this.snapshots.splice(0, this.snapshots.length, ...keep);
+    this.persist();
+    return count;
   }
 }

@@ -1,17 +1,45 @@
-import { loadConfig, parseConfig, saveConfig } from '../core/config';
-import type { StorageLike } from '../core/config';
-import type { WbmLegacyApi, WbmPublicApi, WbmStatus } from '../core/types';
+import {
+  loadApiConfig,
+  loadConfig,
+  parseConfig,
+  saveApiConfig,
+  saveConfig,
+  type StorageLike,
+} from '../core/config';
+import type {
+  BackendChatRecord,
+  BookSyncResult,
+  IsolationInfo,
+  KeywordScanResult,
+  PatchOp,
+  RouterResult,
+  WbmApiConfig,
+  WbmLegacyApi,
+  WbmPublicApi,
+  WbmStatus,
+  WorldUpdateCommand,
+  WorldbookEntryLike,
+} from '../core/types';
 import { EventSubscriptions } from '../infra/events';
 import { type LogRecord, Logger } from '../infra/logger';
 import { detectRuntimeHealth, getRuntimeEventName, type RuntimeCapabilities } from '../infra/runtime';
+import { migrateLegacyWbm } from '../services/migration/legacyWbmMigration';
 import { WorldUpdateParser } from '../services/parser/worldUpdateParser';
 import { PatchProcessor } from '../services/patch/patchProcessor';
 import { ExternalAiClient, TavernAiClient } from '../services/review/aiClient';
+import { ApiPresetManager } from '../services/review/apiPresetManager';
+import { ContextScanner } from '../services/review/contextScanner';
 import { collectRecentChatMessages } from '../services/review/messageCollector';
 import { PendingQueue } from '../services/review/pendingQueue';
+import { PromptEntryManager } from '../services/review/promptEntryManager';
+import { PromptPresetManager } from '../services/review/promptPresetManager';
 import { type ChatMessage, ReviewService } from '../services/review/reviewService';
 import { CommandRouter } from '../services/router/router';
 import { FloorScheduler } from '../services/scheduler/scheduler';
+import { AiRegistry } from '../services/worldbook/aiRegistry';
+import { BackupManager } from '../services/worldbook/backupManager';
+import { BookSyncService } from '../services/worldbook/bookSync';
+import { ChatIsolation } from '../services/worldbook/chatIsolation';
 import { TavernWorldbookRepository } from '../services/worldbook/repository';
 import { SnapshotStore } from '../services/worldbook/snapshotStore';
 import { TargetBookResolver } from '../services/worldbook/targetResolver';
@@ -44,6 +72,54 @@ function createScheduler(config: {
   });
 }
 
+function compactText(text: string, maxLength = 280): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function findEntryByName(entries: WorldbookEntryLike[], entryName: string): WorldbookEntryLike | null {
+  const needle = entryName.trim().toLowerCase();
+  for (const entry of entries) {
+    const name = String(entry.name ?? entry.comment ?? '').trim().toLowerCase();
+    if (name === needle) return entry;
+  }
+  return null;
+}
+
+const FULL_ENTRY_TEMPLATE: WorldbookEntryLike = {
+  name: '',
+  comment: '',
+  content: '',
+  keys: '',
+  secondary_keys: '',
+  enabled: true,
+  constant: false,
+  selective: true,
+  selectiveLogic: 0,
+  depth: 4,
+  order: 200,
+  position: 4,
+  role: 0,
+  scanDepth: null,
+  caseSensitive: null,
+  matchWholeWords: null,
+  useGroupScoring: null,
+  automationId: '',
+  probability: 100,
+  useProbability: true,
+  group: '',
+  groupOverride: false,
+  groupWeight: 100,
+  sticky: null,
+  cooldown: null,
+  delay: null,
+  prevent_recursion: false,
+  delay_until_recursion: false,
+  displayIndex: null,
+  excludeRecursion: false,
+  vectorized: false,
+};
+
 export interface RuntimeSessionHandle {
   api: WbmPublicApi;
   legacyShell: WbmLegacyApi;
@@ -52,11 +128,21 @@ export interface RuntimeSessionHandle {
 
 export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSessionHandle {
   const { runtime, storage, version } = options;
+
+  const preLogger = new Logger('WBM3', 'info');
+  migrateLegacyWbm(storage, preLogger);
+
   const config = loadConfig(storage ?? undefined);
+  const apiConfig = loadApiConfig(storage ?? undefined);
+
+  if (config.externalEndpoint && !apiConfig.endpoint) apiConfig.endpoint = config.externalEndpoint;
+  if (config.externalApiKey && !apiConfig.key) apiConfig.key = config.externalApiKey;
+  if (config.externalModel && !apiConfig.model) apiConfig.model = config.externalModel;
+
   const logs: LogRecord[] = [];
   const logger = new Logger('WBM3', config.logLevel, record => {
     logs.push(record);
-    if (logs.length > 600) logs.splice(0, logs.length - 600);
+    if (logs.length > 800) logs.splice(0, logs.length - 800);
   });
 
   logger.setLevel(config.logLevel);
@@ -67,17 +153,24 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   const repository = new TavernWorldbookRepository(logger, runtime.worldbook);
   const repositoryCaps = repository.getCapabilities();
   const queue = new PendingQueue(storage);
-  const snapshots = new SnapshotStore(storage);
+  const snapshots = new SnapshotStore(storage, config.snapshotRetention);
   const router = new CommandRouter(repository, patchProcessor, logger, queue, snapshots);
   const targetResolver = new TargetBookResolver(logger, runtime.worldbook);
   const events = new EventSubscriptions(runtime.events.source, logger, runtime.events.eventOn);
+  const contextScanner = new ContextScanner();
+  const promptEntryManager = new PromptEntryManager(storage);
+  const apiPresetManager = new ApiPresetManager(storage);
+  const promptPresetManager = new PromptPresetManager(storage);
+  const aiRegistry = new AiRegistry(storage);
+  const isolation = new ChatIsolation(storage);
+  const backupManager = new BackupManager(storage, config.snapshotRetention);
+  const bookSync = new BookSyncService(repository, logger);
+
   let scheduler = createScheduler(config);
   let aiClient =
-    config.mode === 'external' && config.externalEndpoint
+    config.mode === 'external' && (config.externalEndpoint || apiConfig.endpoint)
       ? new ExternalAiClient(logger, {
-          endpoint: config.externalEndpoint,
-          apiKey: config.externalApiKey,
-          model: config.externalModel,
+          api: buildExternalApiConfig(config, apiConfig),
           fetchFn: runtime.review.fetchFn,
         })
       : new TavernAiClient(logger, runtime.review);
@@ -91,6 +184,24 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   let panel: VuePanelController;
   let api: WbmPublicApi;
 
+  const backendChats: BackendChatRecord[] = [];
+
+  function pushBackendRecord(record: BackendChatRecord): void {
+    backendChats.push(record);
+    if (backendChats.length > 120) {
+      backendChats.splice(0, backendChats.length - 120);
+    }
+  }
+
+  function buildExternalApiConfig(currentConfig: typeof config, currentApiConfig: WbmApiConfig): WbmApiConfig {
+    return {
+      ...currentApiConfig,
+      endpoint: currentConfig.externalEndpoint || currentApiConfig.endpoint,
+      key: currentConfig.externalApiKey || currentApiConfig.key,
+      model: currentConfig.externalModel || currentApiConfig.model,
+    };
+  }
+
   const getStatus = (): WbmStatus => ({
     autoEnabled: config.autoEnabled,
     processing,
@@ -101,6 +212,14 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     backendAvailable: repositoryCaps.highLevel || repositoryCaps.legacy,
     eventSourceAvailable: runtimeHealth.eventSourceAvailable,
     mountAvailable: runtimeHealth.mountAvailable,
+    lastAiFloor: lastObservedFloor,
+    nextUpdateAiFloor: scheduler.getState().nextDueFloor,
+    pendingCount: queue.count(),
+    depsState: {
+      highLevelWorldbook: runtimeHealth.highLevelWorldbook,
+      legacyWorldbook: runtimeHealth.legacyWorldbook,
+    },
+    contextSource: config.contextMode,
   });
 
   const rebuildScheduler = (currentFloor: number): void => {
@@ -110,11 +229,9 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
   const rebuildReviewService = (): void => {
     aiClient =
-      config.mode === 'external' && config.externalEndpoint
+      config.mode === 'external' && (config.externalEndpoint || apiConfig.endpoint)
         ? new ExternalAiClient(logger, {
-            endpoint: config.externalEndpoint,
-            apiKey: config.externalApiKey,
-            model: config.externalModel,
+            api: buildExternalApiConfig(config, apiConfig),
             fetchFn: runtime.review.fetchFn,
           })
         : new TavernAiClient(logger, runtime.review);
@@ -146,24 +263,95 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     }
     processing = true;
     panel.refresh();
+
+    let promptPreview = '';
+    let replyPreview = '';
+    let commandCount = 0;
     try {
       const worldbookEntries = await repository.getEntries(bookName).catch(error => {
         logger.warn(`读取世界书失败，使用空上下文: ${bookName}`, error);
         return [];
       });
-      const commands = await reviewService.review(messages, {
+
+      if (config.autoBackupBeforeAI) {
+        backupManager.create(bookName, worldbookEntries, `pre-review:${source}`, floor, activeChatId || undefined);
+      }
+
+      const trace = await reviewService.reviewWithTrace(messages, {
         bookName,
         source,
         reviewDepth: config.reviewDepth,
         worldbookEntries,
+        contextMode: config.contextMode,
+        contentFilterMode: config.contentFilterMode,
+        contentFilterTags: config.contentFilterTags,
+        maxContentChars: config.maxContentChars,
+        excludeConstantFromPrompt: config.excludeConstantFromPrompt,
+        sendUserMessages: config.sendUserMessages,
+        sendAiMessages: config.sendAiMessages,
+        scanText: contextScanner.buildScanText(messages, config.reviewDepth),
       });
-      const results = await router.execute(commands, bookName, {
+
+      promptPreview = compactText(trace.prompts.map(item => `${item.role}:${item.content}`).join('\n'));
+      replyPreview = compactText(trace.reply);
+      commandCount = trace.commands.length;
+
+      const results = await router.execute(trace.commands, bookName, {
         approvalMode: config.approvalMode,
         source,
         floor,
         chatId: activeChatId || undefined,
+        confirmUpdate: config.confirmUpdate,
+        maxCreatePerRound: config.maxCreatePerRound,
       });
+
+      if (config.aiRegistryEnabled) {
+        for (const result of results) {
+          if (result.status !== 'ok') continue;
+          if (result.action !== 'create' && result.action !== 'update' && result.action !== 'patch') continue;
+          aiRegistry.mark(bookName, result.entry_name, source);
+        }
+      }
+
+      if (config.chatIsolationEnabled && activeChatId) {
+        for (const result of results) {
+          if (result.status !== 'ok') continue;
+          isolation.record(bookName, result.entry_name);
+        }
+      }
+
+      if (config.autoVerifyAfterUpdate) {
+        const verify = await bookSync.verify(bookName, results);
+        if (!verify.ok) {
+          logger.warn(`自动验证发现问题: ${verify.issueCount}`);
+        }
+      }
+
       logger.info('审核执行完成', results);
+      pushBackendRecord({
+        id: `backend_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: new Date().toISOString(),
+        source,
+        bookName,
+        promptPreview,
+        outputPreview: replyPreview,
+        commandCount,
+        success: !results.some(item => item.status === 'error'),
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      pushBackendRecord({
+        id: `backend_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        createdAt: new Date().toISOString(),
+        source,
+        bookName,
+        promptPreview,
+        outputPreview: replyPreview,
+        commandCount,
+        success: false,
+        error: reason,
+      });
+      throw error;
     } finally {
       processing = false;
       scheduler.unlock();
@@ -173,6 +361,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
   const runAutoReview = async (timing: 'before' | 'after', floor: number): Promise<void> => {
     if (!config.autoEnabled) return;
+    if (config.directTriggerOnly) return;
     if (!scheduler.shouldTrigger(timing, floor)) return;
 
     try {
@@ -194,9 +383,18 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const normalized = parseConfig(next);
       Object.assign(config, normalized);
       saveConfig(config, storage ?? undefined);
+
+      // 保持 external 字段与 api 配置的兼容同步
+      apiConfig.endpoint = config.externalEndpoint || apiConfig.endpoint;
+      apiConfig.key = config.externalApiKey || apiConfig.key;
+      apiConfig.model = config.externalModel || apiConfig.model;
+      saveApiConfig(apiConfig, storage ?? undefined);
+
       logger.setLevel(config.logLevel);
       rebuildScheduler(lastObservedFloor);
       rebuildReviewService();
+      snapshots.setRetention(config.snapshotRetention);
+      backupManager.setRetention(config.snapshotRetention);
       panel.refresh();
     },
     listEntries: async () => {
@@ -260,7 +458,101 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   repository.logBackend();
   logger.info(`调度器已初始化: nextDue@0=${scheduler.nextDue(0)} version=${version || 'dev'}`);
 
+  const getEntries = async (bookName?: string): Promise<WorldbookEntryLike[]> => {
+    const target = await resolveBookName(bookName);
+    return await repository.getEntries(target);
+  };
+
+  const addEntry = async (bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void> => {
+    await repository.addEntry(bookName, fields);
+    panel.refresh();
+  };
+
+  const updateEntry = async (bookName: string, entry: WorldbookEntryLike): Promise<void> => {
+    await repository.updateEntry(bookName, entry);
+    panel.refresh();
+  };
+
+  const deleteEntry = async (bookName: string, uid: number | string): Promise<void> => {
+    await repository.deleteEntry(bookName, uid);
+    panel.refresh();
+  };
+
+  const patchEntry = async (
+    bookName: string,
+    entryName: string,
+    ops: PatchOp[],
+  ): Promise<{ applied: number; skipped: number; errors: string[] }> => {
+    const entries = await repository.getEntries(bookName);
+    const target = findEntryByName(entries, entryName);
+    if (!target) throw new Error(`未找到条目: ${entryName}`);
+    const next = { ...target };
+    const result = patchProcessor.apply(next, ops);
+    if (result.applied > 0) {
+      await repository.updateEntry(bookName, next);
+      panel.refresh();
+    }
+    return result;
+  };
+
+  const executeCommands = async (commands: WorldUpdateCommand[], bookName: string): Promise<RouterResult[]> => {
+    const results = await router.execute(commands, bookName, {
+      approvalMode: config.approvalMode,
+      source: 'manual',
+      floor: lastObservedFloor,
+      chatId: activeChatId || undefined,
+      confirmUpdate: config.confirmUpdate,
+      maxCreatePerRound: config.maxCreatePerRound,
+    });
+    panel.refresh();
+    return results;
+  };
+
+  const buildFullContext = async (bookName?: string): Promise<string> => {
+    const target = await resolveBookName(bookName);
+    const entries = await repository.getEntries(target);
+    return await reviewService.promptBuilder.buildFullContext(target, entries);
+  };
+
+  const buildSummary = async (bookName?: string): Promise<string> => {
+    const target = await resolveBookName(bookName);
+    const entries = await repository.getEntries(target);
+    return await reviewService.promptBuilder.buildSummary(target, entries);
+  };
+
+  const buildTriggeredContext = async (bookName?: string, depth?: number): Promise<string> => {
+    const target = await resolveBookName(bookName);
+    const entries = await repository.getEntries(target);
+    const scanText = contextScanner.buildScanText(collectMessages(), depth ?? config.reviewDepth);
+    return await reviewService.promptBuilder.buildTriggeredContext(target, entries, scanText);
+  };
+
+  const scanKeywords = async (bookName?: string, depth?: number): Promise<KeywordScanResult> => {
+    const target = await resolveBookName(bookName);
+    const entries = await repository.getEntries(target);
+    const scanText = contextScanner.buildScanText(collectMessages(), depth ?? config.reviewDepth);
+    return contextScanner.scan(entries, scanText);
+  };
+
+  const verifyBook = async (bookName?: string, results?: RouterResult[]): Promise<BookSyncResult> => {
+    const target = await resolveBookName(bookName);
+    return await bookSync.verify(target, results);
+  };
+
+  const repairBook = async (
+    bookName?: string,
+    verifyResult?: BookSyncResult,
+    commands?: WorldUpdateCommand[],
+  ): Promise<BookSyncResult> => {
+    const target = await resolveBookName(bookName);
+    return await bookSync.repair(target, verifyResult, commands, executeCommands);
+  };
+
+  const getIsolationInfo = (): IsolationInfo => isolation.getCurrentInfo(targetBookName || undefined);
+
   api = {
+    version,
+    FULL_ENTRY_TEMPLATE,
     openUI: () => panel.open(),
     closeUI: () => panel.close(),
     manualReview: async (bookName, messages) => {
@@ -276,6 +568,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
           source: pending.source,
           floor: pending.floor,
           chatId: pending.chatId,
+          confirmUpdate: config.confirmUpdate,
+          maxCreatePerRound: config.maxCreatePerRound,
         });
       }
       panel.refresh();
@@ -302,6 +596,43 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     listQueue: () => queue.list(),
     listSnapshots: bookName => snapshots.list(bookName),
     getStatus: () => getStatus(),
+
+    getEntries,
+    addEntry,
+    updateEntry,
+    deleteEntry,
+    patchEntry,
+
+    parseCommands: text => parser.parse(text),
+    executeCommands,
+
+    buildFullContext,
+    buildSummary,
+    buildTriggeredContext,
+    scanKeywords,
+
+    verifyBook,
+    repairBook,
+
+    getPendingQueue: () => queue.getPending(),
+    getPendingCount: () => queue.count(),
+    approveAll: async ids => await api.approveQueue(ids),
+    approveOne: async id => await api.approveQueue([id]),
+    rejectAll: async ids => await api.rejectQueue(ids),
+    rejectOne: async id => await api.rejectQueue([id]),
+    getSnapshots: bookName => snapshots.list(bookName),
+    cleanupQueue: () => queue.cleanup(),
+    clearQueue: () => queue.clearAll(),
+
+    getIsolationInfo,
+    getIsolationStats: (bookName?: string) => isolation.getStats(bookName),
+    clearMyIsolation: (bookName?: string) => isolation.clearMine(bookName),
+    clearAllIsolation: (bookName?: string) => isolation.clearAll(bookName),
+    promoteIsolationToGlobal: async (_bookName?: string) => {
+      // v3 中该操作只返回候选列表并清理隔离映射，不自动写入条目。
+      const promoted = isolation.promoteToGlobal(_bookName);
+      logger.info(`隔离条目已标记晋升: ${promoted.length}`);
+    },
   };
 
   const eventMessageReceived = getRuntimeEventName(runtime, 'MESSAGE_RECEIVED', 'message_received');
@@ -341,6 +672,18 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   events.on(eventMessageDeleted, (...args) => {
     const floor = toMessageId(args[0]);
     if (floor == null) return;
+
+    if (config.syncOnDelete) {
+      void api
+        .rollbackFloor(floor, activeChatId || undefined)
+        .then(() => {
+          logger.info(`删除消息后已回滚到 floor=${floor}`);
+        })
+        .catch(error => {
+          logger.warn(`删除消息回滚失败 floor=${floor}`, error);
+        });
+    }
+
     if (lastObservedFloor >= floor) {
       const resetFloor = Math.max(0, floor - 1);
       scheduler.reset(resetFloor);
@@ -351,6 +694,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   });
   events.on(eventChatChanged, (...args) => {
     activeChatId = String(args[0] ?? '');
+    isolation.setCurrentChat(activeChatId);
     resetRuntimeState(`聊天切换，已重置运行时状态: ${activeChatId || '(unknown)'}`);
   });
   events.on(eventCharacterPageLoaded, () => {
@@ -374,6 +718,11 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     logger.warn('window 不可用，已跳过全局 API 挂载');
     logger.info('动态世界书 v3 已就绪（未挂载全局 API）');
   }
+
+  // 防止 tree-shaking 误删：这些管理器通过 API 间接使用，启动时记录可见性。
+  logger.info(
+    `管理器已加载: prompts=${promptEntryManager.list().length} apiPresets=${apiPresetManager.list().length} promptPresets=${promptPresetManager.list().length}`,
+  );
 
   return {
     api,

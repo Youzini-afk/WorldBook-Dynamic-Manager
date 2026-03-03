@@ -58,4 +58,20 @@ describe('SnapshotStore', () => {
     expect(store.findLatestByFloor(12, 'missing')).toBeNull();
     expect(store.findLatestByFloor(12, 'chat-b')?.id).toBe('s2');
   });
+
+  it('setRetention 与 clear 应生效', () => {
+    const store = new SnapshotStore(memoryStorage(), 3);
+    store.save({ id: 's1', bookName: 'bookA', createdAt: new Date().toISOString(), reason: 'r1', entries: [] });
+    store.save({ id: 's2', bookName: 'bookA', createdAt: new Date().toISOString(), reason: 'r2', entries: [] });
+    store.save({ id: 's3', bookName: 'bookA', createdAt: new Date().toISOString(), reason: 'r3', entries: [] });
+
+    store.setRetention(2);
+    expect(store.list()).toHaveLength(2);
+    expect(store.list().map(item => item.id)).toEqual(['s2', 's3']);
+
+    store.save({ id: 'b1', bookName: 'bookB', createdAt: new Date().toISOString(), reason: 'r4', entries: [] });
+    expect(store.clear('bookA')).toBeGreaterThan(0);
+    expect(store.list('bookA')).toHaveLength(0);
+    expect(store.clear()).toBe(1);
+  });
 });

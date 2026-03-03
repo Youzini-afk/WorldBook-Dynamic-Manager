@@ -109,4 +109,57 @@ describe('PendingQueue', () => {
     });
     expect(new PendingQueue(nonArray).size()).toBe(0);
   });
+
+  it('兼容方法 rejectOne / clearAll / getPending / count', () => {
+    const queue = new PendingQueue(memoryStorage());
+    queue.enqueue({
+      id: 'q1',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [],
+    });
+    queue.enqueue({
+      id: 'q2',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [],
+    });
+
+    expect(queue.getPending()).toHaveLength(2);
+    expect(queue.count()).toBe(2);
+    expect(queue.rejectOne('q1')).toBe(1);
+    expect(queue.count()).toBe(1);
+    expect(queue.clearAll()).toBe(1);
+    expect(queue.count()).toBe(0);
+  });
+
+  it('cleanup 应清理过期任务并保留有效任务', () => {
+    const queue = new PendingQueue(memoryStorage());
+    queue.enqueue({
+      id: 'old',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString(),
+      commands: [],
+    });
+    queue.enqueue({
+      id: 'new',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: new Date().toISOString(),
+      commands: [],
+    });
+    queue.enqueue({
+      id: 'unknown',
+      bookName: 'bookA',
+      source: 'manual',
+      createdAt: 'not-a-date',
+      commands: [],
+    });
+
+    expect(queue.cleanup()).toBe(1);
+    expect(queue.list().map(item => item.id).sort()).toEqual(['new', 'unknown']);
+  });
 });

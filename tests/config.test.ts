@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_API_CONFIG,
   DEFAULT_CONFIG,
+  clearApiConfig,
   clearConfig,
+  loadApiConfig,
   loadConfig,
+  loadEntryDefaults,
+  loadJson,
+  parseApiConfig,
+  parseEntryDefaults,
   parseConfig,
+  saveApiConfig,
   saveConfig,
+  saveEntryDefaults,
+  saveJson,
   storageKey,
 } from '../src/WBM/core/config';
 import { memoryStorage } from './helpers';
@@ -43,13 +53,12 @@ describe('config', () => {
     expect(loaded.interval).toBe(DEFAULT_CONFIG.interval);
   });
 
-  it('schema 非法值会抛错', () => {
-    expect(() =>
-      parseConfig({
-        ...DEFAULT_CONFIG,
-        approvalMode: 'bad-value',
-      }),
-    ).toThrow();
+  it('schema 非法值会回退到默认值', () => {
+    const parsed = parseConfig({
+      ...DEFAULT_CONFIG,
+      approvalMode: 'bad-value',
+    });
+    expect(parsed.approvalMode).toBe(DEFAULT_CONFIG.approvalMode);
   });
 
   it('clearConfig 会清空配置', () => {
@@ -57,5 +66,48 @@ describe('config', () => {
     saveConfig(DEFAULT_CONFIG, storage);
     clearConfig(storage);
     expect(loadConfig(storage)).toEqual(DEFAULT_CONFIG);
+  });
+
+  it('API 配置读写与清理可用', () => {
+    const storage = memoryStorage();
+    saveApiConfig(
+      {
+        ...DEFAULT_API_CONFIG,
+        endpoint: 'https://api.example.com',
+        retries: 3,
+      },
+      storage,
+    );
+    expect(loadApiConfig(storage).retries).toBe(3);
+    clearApiConfig(storage);
+    expect(loadApiConfig(storage)).toEqual(DEFAULT_API_CONFIG);
+  });
+
+  it('entry defaults 与 loadJson/saveJson 可用', () => {
+    const storage = memoryStorage();
+    saveEntryDefaults(
+      {
+        enabled: false,
+        constant: true,
+        selective: false,
+        depth: 7,
+        order: 888,
+      },
+      storage,
+    );
+    expect(loadEntryDefaults(storage).depth).toBe(7);
+
+    saveJson('x', { a: 1 }, storage);
+    expect(loadJson('x', { a: 0 }, storage)).toEqual({ a: 1 });
+  });
+
+  it('parseApiConfig/parseEntryDefaults 非法值回退默认', () => {
+    const api = parseApiConfig({ retries: 999, type: 'invalid' });
+    expect(api.type).toBe(DEFAULT_API_CONFIG.type);
+    expect(api.retries).toBe(DEFAULT_API_CONFIG.retries);
+
+    const defaults = parseEntryDefaults({ depth: -9, order: '100' });
+    expect(defaults.depth).toBeGreaterThanOrEqual(0);
+    expect(defaults.order).toBe(100);
   });
 });

@@ -168,4 +168,59 @@ describe('CommandRouter', () => {
     expect(results[1].status).toBe('error');
     expect(results[1].code).toBe('REPOSITORY_ENTRY_UID_MISSING');
   });
+
+  it('confirmUpdate 与 maxCreatePerRound 分支应生效', async () => {
+    const queue: PendingReviewItem[] = [];
+    const repository = new InMemoryRepository({
+      bookA: [{ uid: 0, name: '条目A', content: 'old' }],
+    });
+    const router = new CommandRouter(
+      repository,
+      new PatchProcessor(),
+      noopLogger,
+      {
+        enqueue(item) {
+          queue.push(item);
+        },
+      },
+      undefined,
+    );
+
+    const results = await router.execute(
+      [
+        { action: 'update', entry_name: '条目A', fields: { content: 'new' }, ops: [] },
+        { action: 'create', entry_name: '条目B', fields: {}, ops: [] },
+        { action: 'create', entry_name: '条目C', fields: {}, ops: [] },
+      ],
+      'bookA',
+      { approvalMode: 'auto', confirmUpdate: true, maxCreatePerRound: 1 },
+    );
+
+    expect(results[0].status).toBe('queued');
+    expect(results[0].code).toBe('ROUTER_CONFIRM_UPDATE_REQUIRED');
+    expect(results[2].status).toBe('skipped');
+    expect(results[2].code).toBe('ROUTER_MAX_CREATE_REACHED');
+    expect(queue).toHaveLength(1);
+  });
+
+  it('patch 全失败时应返回 ROUTER_PATCH_FAILED', async () => {
+    const repository = new InMemoryRepository({
+      bookA: [{ uid: 0, name: '条目A', content: 'old' }],
+    });
+    const router = new CommandRouter(repository, new PatchProcessor(), noopLogger);
+    const results = await router.execute(
+      [
+        {
+          action: 'patch',
+          entry_name: '条目A',
+          fields: {},
+          ops: [{ op: 'set_field', field: 'forbidden', value: 1 }],
+        },
+      ],
+      'bookA',
+      { approvalMode: 'auto' },
+    );
+    expect(results[0].status).toBe('error');
+    expect(results[0].code).toBe('ROUTER_PATCH_FAILED');
+  });
 });

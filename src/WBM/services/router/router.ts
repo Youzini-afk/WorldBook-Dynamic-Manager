@@ -42,6 +42,8 @@ export interface RouterExecutionOptions {
   source?: PendingReviewItem['source'];
   floor?: number;
   chatId?: string;
+  confirmUpdate?: boolean;
+  maxCreatePerRound?: number;
 }
 
 export class CommandRouter {
@@ -62,6 +64,9 @@ export class CommandRouter {
     const source = options.source ?? 'manual';
     const floor = options.floor;
     const chatId = options.chatId;
+    const confirmUpdate = options.confirmUpdate ?? false;
+    const maxCreatePerRound = options.maxCreatePerRound ?? 0;
+
     if (approvalMode === 'manual') {
       const queued = this.enqueueCommands(commands, bookName, source, floor, chatId);
       return commands.map(command => ({
@@ -73,6 +78,8 @@ export class CommandRouter {
     }
 
     const results: RouterResult[] = [];
+    let createCount = 0;
+
     for (const command of commands) {
       if (approvalMode === 'selective' && command.action === 'delete') {
         const queued = this.enqueueCommands([command], bookName, source, floor, chatId);
@@ -85,16 +92,43 @@ export class CommandRouter {
         continue;
       }
 
+      if (confirmUpdate && command.action === 'update') {
+        const queued = this.enqueueCommands([command], bookName, source, floor, chatId);
+        results.push({
+          action: 'queue',
+          entry_name: command.entry_name,
+          status: 'queued',
+          code: 'ROUTER_CONFIRM_UPDATE_REQUIRED',
+          detail: `update 指令需要确认: ${queued.id}`,
+        });
+        continue;
+      }
+
+      if (command.action === 'create' && maxCreatePerRound > 0 && createCount >= maxCreatePerRound) {
+        results.push({
+          action: 'create',
+          entry_name: command.entry_name,
+          status: 'skipped',
+          code: 'ROUTER_MAX_CREATE_REACHED',
+          reason: `达到每轮创建上限: ${maxCreatePerRound}`,
+        });
+        continue;
+      }
+
       try {
         const result = await this.executeOne(command, bookName, floor, chatId);
+        if (command.action === 'create' && result.status === 'ok') {
+          createCount++;
+        }
         results.push(result);
       } catch (error) {
-        this.logger.error('指令执行失败', { command, error });
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.error('指令执行失败', { command, error: reason });
         results.push({
           action: command.action,
           entry_name: command.entry_name,
           status: 'error',
-          reason: String(error),
+          reason,
         });
       }
     }
@@ -159,6 +193,7 @@ export class CommandRouter {
         action: command.action,
         entry_name: command.entry_name,
         status: 'skipped',
+        code: 'ROUTER_ENTRY_NOT_FOUND',
         reason: '未找到目标条目',
       };
     }
@@ -187,6 +222,16 @@ export class CommandRouter {
 
     const next = { ...target, ...command.fields };
     const patchResult = this.patchProcessor.apply(next, command.ops);
+    if (patchResult.applied === 0 && patchResult.errors.length > 0) {
+      return {
+        action: 'patch',
+        entry_name: command.entry_name,
+        status: 'error',
+        code: 'ROUTER_PATCH_FAILED',
+        reason: patchResult.errors.join('; '),
+      };
+    }
+
     await this.saveSnapshot(bookName, `patch:${command.entry_name}`, floor, chatId);
     await this.repository.updateEntry(bookName, next);
     return {

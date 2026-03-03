@@ -58,4 +58,55 @@ describe('ReviewPromptBuilder', () => {
       enabled: false,
     });
   });
+
+  it('triggered + tags + 消息过滤应生效', () => {
+    const builder = new ReviewPromptBuilder();
+    const prompts = builder.build(
+      [
+        { role: 'user', content: '剑士出现' },
+        { role: 'assistant', content: 'AI 回复' },
+      ],
+      {
+        bookName: 'book-C',
+        source: 'auto',
+        reviewDepth: 10,
+        contextMode: 'triggered',
+        contentFilterMode: 'tags',
+        contentFilterTags: '剑',
+        sendAiMessages: false,
+        sendUserMessages: true,
+        scanText: '剑士出现',
+        worldbookEntries: [
+          { uid: 1, name: '条目A', keys: '剑', secondary_keys: '战士', content: 'A', constant: false },
+          { uid: 2, name: '条目B', keys: '法术', content: 'B', constant: true },
+        ],
+      },
+    );
+
+    const payload = JSON.parse(prompts[2].content) as {
+      worldbook_entries: Array<Record<string, unknown>>;
+      recent_chat: Array<{ role: string; content: string }>;
+    };
+
+    expect(payload.worldbook_entries).toHaveLength(1);
+    expect(payload.worldbook_entries[0].name).toBe('条目A');
+    expect(payload.recent_chat).toHaveLength(1);
+    expect(payload.recent_chat[0].role).toBe('user');
+  });
+
+  it('buildFullContext/buildSummary/buildTriggeredContext 可生成文本', async () => {
+    const builder = new ReviewPromptBuilder();
+    const entries = [
+      { uid: 1, name: '条目A', keys: '剑', content: 'A内容' },
+      { uid: 2, name: '条目B', keys: '法', content: 'B内容' },
+    ];
+
+    const full = await builder.buildFullContext('book-A', entries);
+    const summary = await builder.buildSummary('book-A', entries);
+    const triggered = await builder.buildTriggeredContext('book-A', entries, '剑士');
+
+    expect(full).toContain('条目A');
+    expect(summary).toContain('世界书摘要');
+    expect(triggered).toContain('命中 1/2');
+  });
 });

@@ -6,73 +6,22 @@ export function buildLegacyShell(api: WbmPublicApi, logger: Logger): WbmLegacyAp
   const warn = (): void => {
     if (warned) return;
     warned = true;
-    logger.warn('window.WBM 已弃用，请迁移到 window.WBM3（兼容壳计划在 v3.2 后移除）');
+    logger.warn('window.WBM 已弃用，请迁移到 window.WBM3（兼容壳计划在 v3.3 后评估收缩）');
   };
 
-  return {
-    openUI: () => {
+  const handler: ProxyHandler<WbmPublicApi> = {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value === 'function') {
+        return (...args: unknown[]) => {
+          warn();
+          return Reflect.apply(value as (...fnArgs: unknown[]) => unknown, target, args);
+        };
+      }
       warn();
-      api.openUI();
-    },
-    closeUI: () => {
-      warn();
-      api.closeUI();
-    },
-    manualReview: async (bookName, messages) => {
-      warn();
-      return await api.manualReview(bookName, messages);
-    },
-    approveQueue: async ids => {
-      warn();
-      await api.approveQueue(ids);
-    },
-    rejectQueue: async ids => {
-      warn();
-      return await api.rejectQueue(ids);
-    },
-    rollback: async snapshotId => {
-      warn();
-      await api.rollback(snapshotId);
-    },
-    rollbackFloor: async (floor, chatId) => {
-      warn();
-      await api.rollbackFloor(floor, chatId);
-    },
-    listQueue: () => {
-      warn();
-      return api.listQueue();
-    },
-    listSnapshots: bookName => {
-      warn();
-      return api.listSnapshots(bookName);
-    },
-    getStatus: () => {
-      warn();
-      return api.getStatus();
-    },
-    approveAll: async ids => {
-      warn();
-      await api.approveQueue(ids);
-    },
-    approveOne: async id => {
-      warn();
-      await api.approveQueue([id]);
-    },
-    rejectAll: async ids => {
-      warn();
-      return await api.rejectQueue(ids);
-    },
-    rejectOne: async id => {
-      warn();
-      return await api.rejectQueue([id]);
-    },
-    getPendingQueue: () => {
-      warn();
-      return api.listQueue();
-    },
-    getSnapshots: bookName => {
-      warn();
-      return api.listSnapshots(bookName);
+      return value;
     },
   };
+
+  return new Proxy(api, handler) as WbmLegacyApi;
 }

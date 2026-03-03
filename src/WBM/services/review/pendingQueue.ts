@@ -42,6 +42,10 @@ export class PendingQueue {
     return clone(this.items);
   }
 
+  getPending(): PendingReviewItem[] {
+    return this.list();
+  }
+
   take(ids?: string[]): PendingReviewItem[] {
     if (!ids || ids.length === 0) {
       const all = this.list();
@@ -74,6 +78,35 @@ export class PendingQueue {
     this.items.splice(0, this.items.length, ...keep);
     this.persist();
     return count;
+  }
+
+  rejectOne(id: string): number {
+    return this.reject([id]);
+  }
+
+  clearAll(): number {
+    return this.reject();
+  }
+
+  cleanup(): number {
+    const before = this.items.length;
+    const now = Date.now();
+    const ttl = 14 * 24 * 60 * 60 * 1000;
+    const keep = this.items.filter(item => {
+      const timestamp = Date.parse(item.createdAt);
+      if (!Number.isFinite(timestamp)) return true;
+      return now - timestamp <= ttl;
+    });
+    const removed = before - keep.length;
+    if (removed > 0) {
+      this.items.splice(0, this.items.length, ...keep);
+      this.persist();
+    }
+    return removed;
+  }
+
+  count(): number {
+    return this.items.length;
   }
 
   size(): number {

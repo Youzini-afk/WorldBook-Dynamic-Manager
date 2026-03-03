@@ -2,8 +2,12 @@ export type WorldAction = 'create' | 'update' | 'delete' | 'patch';
 export type TriggerTiming = 'before' | 'after' | 'both';
 export type ReviewMode = 'inline' | 'external';
 export type ApiSource = 'tavern' | 'custom';
+export type ApiType = 'openai' | 'custom' | 'gemini';
 export type TargetType = 'charPrimary' | 'charAdditional' | 'global' | 'managed';
 export type ApprovalMode = 'auto' | 'manual' | 'selective';
+export type ContextMode = 'full' | 'triggered' | 'summary';
+export type ContentFilterMode = 'none' | 'tags';
+export type RefreshMode = 'full' | 'minimal';
 export type RouterStatus = 'ok' | 'skipped' | 'queued' | 'error';
 
 export type WbmErrorCode =
@@ -14,6 +18,9 @@ export type WbmErrorCode =
   | 'REPOSITORY_ENTRY_UID_MISSING'
   | 'ROUTER_ENTRY_NOT_FOUND'
   | 'ROUTER_ACTION_INVALID'
+  | 'ROUTER_CONFIRM_UPDATE_REQUIRED'
+  | 'ROUTER_MAX_CREATE_REACHED'
+  | 'ROUTER_PATCH_FAILED'
   | 'SCHEDULER_LOCKED'
   | 'SCHEDULER_DISABLED'
   | 'TARGET_BOOK_UNRESOLVED';
@@ -63,19 +70,93 @@ export interface SchedulerState {
   nextDueFloor: number;
 }
 
+export interface WbmApiConfig {
+  type: ApiType;
+  endpoint: string;
+  key: string;
+  model: string;
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+  timeoutMs: number;
+  retries: number;
+}
+
+export interface EntryDefaults {
+  enabled: boolean;
+  constant: boolean;
+  selective: boolean;
+  depth: number;
+  order: number;
+}
+
+export interface PromptEntry {
+  id: string;
+  name: string;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  order: number;
+  enabled: boolean;
+  builtin?: boolean;
+}
+
+export interface ApiPreset {
+  id: string;
+  name: string;
+  config: WbmApiConfig;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PromptPreset {
+  id: string;
+  name: string;
+  entries: PromptEntry[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WbmConfig extends SchedulerConfig {
   mode: ReviewMode;
   apiSource: ApiSource;
   targetType: TargetType;
   targetBookName: string;
+
+  // 兼容 v2/v3 旧字段
   externalEndpoint: string;
   externalApiKey: string;
   externalModel: string;
+
   approvalMode: ApprovalMode;
   reviewDepth: number;
   autoEnabled: boolean;
   confirmDelete: boolean;
   logLevel: 'info' | 'warn' | 'error';
+
+  // 原版全量对齐字段
+  confirmUpdate: boolean;
+  maxCreatePerRound: number;
+  contentFilterMode: ContentFilterMode;
+  contentFilterTags: string;
+  contextMode: ContextMode;
+  maxContentChars: number;
+  patchDuplicateGuard: boolean;
+  fabEnabled: boolean;
+  syncOnDelete: boolean;
+  snapshotRetention: number;
+  excludeConstantFromPrompt: boolean;
+  directTriggerOnly: boolean;
+  sendUserMessages: boolean;
+  sendAiMessages: boolean;
+  autoVerifyAfterUpdate: boolean;
+  refreshMode: RefreshMode;
+  aiRegistryEnabled: boolean;
+  chatIsolationEnabled: boolean;
+  autoBackupBeforeAI: boolean;
+  entryLockEnabled: boolean;
+  tokenEstimateEnabled: boolean;
+  activeApiPreset: string;
+  activePromptPreset: string;
 }
 
 export interface PendingReviewItem {
@@ -83,7 +164,7 @@ export interface PendingReviewItem {
   bookName: string;
   commands: WorldUpdateCommand[];
   createdAt: string;
-  source: 'manual' | 'auto';
+  source: 'manual' | 'auto' | 'legacy';
   floor?: number;
   chatId?: string;
 }
@@ -98,6 +179,49 @@ export interface SnapshotRecord {
   chatId?: string;
 }
 
+export interface BookSyncIssue {
+  type: 'missing' | 'inconsistent' | 'runtime_error';
+  message: string;
+  entryName?: string;
+}
+
+export interface BookSyncResult {
+  ok: boolean;
+  checkedAt: string;
+  bookName: string;
+  issueCount: number;
+  issues: BookSyncIssue[];
+}
+
+export interface IsolationInfo {
+  chatId: string;
+  count: number;
+  entries: string[];
+}
+
+export interface IsolationStats {
+  totalChats: number;
+  totalEntries: number;
+  byChat: Array<{ chatId: string; count: number }>;
+}
+
+export interface BackendChatRecord {
+  id: string;
+  createdAt: string;
+  source: 'manual' | 'auto';
+  bookName: string;
+  promptPreview: string;
+  outputPreview: string;
+  commandCount: number;
+  success: boolean;
+  error?: string;
+}
+
+export interface WbmDepsState {
+  highLevelWorldbook: boolean;
+  legacyWorldbook: boolean;
+}
+
 export interface WbmStatus {
   autoEnabled: boolean;
   processing: boolean;
@@ -108,6 +232,11 @@ export interface WbmStatus {
   backendAvailable: boolean;
   eventSourceAvailable: boolean;
   mountAvailable: boolean;
+  lastAiFloor?: number;
+  nextUpdateAiFloor?: number;
+  pendingCount?: number;
+  depsState?: WbmDepsState;
+  contextSource?: string;
 }
 
 export interface LoggerLike {
@@ -116,13 +245,30 @@ export interface LoggerLike {
   error(message: string, extra?: unknown): void;
 }
 
+export interface KeywordScanItem {
+  uid: number | string | null;
+  name: string;
+  matchedKeys: string[];
+  matchedSecondaryKeys: string[];
+}
+
+export interface KeywordScanResult {
+  triggered: KeywordScanItem[];
+  total: number;
+  scanText: string;
+}
+
 export interface WbmPublicApi {
+  version: string;
+  FULL_ENTRY_TEMPLATE: WorldbookEntryLike;
+
   openUI(): void;
   closeUI(): void;
   manualReview(
     bookName?: string,
     messages?: { role: 'system' | 'user' | 'assistant'; content: string }[],
   ): Promise<void>;
+
   approveQueue(ids?: string[]): Promise<void>;
   rejectQueue(ids?: string[]): Promise<number>;
   rollback(snapshotId: string): Promise<void>;
@@ -130,13 +276,39 @@ export interface WbmPublicApi {
   listQueue(): PendingReviewItem[];
   listSnapshots(bookName?: string): SnapshotRecord[];
   getStatus(): WbmStatus;
-}
 
-export interface WbmLegacyApi extends WbmPublicApi {
+  getEntries(bookName?: string): Promise<WorldbookEntryLike[]>;
+  addEntry(bookName: string, fields: Partial<WorldbookEntryLike>): Promise<void>;
+  updateEntry(bookName: string, entry: WorldbookEntryLike): Promise<void>;
+  deleteEntry(bookName: string, uid: number | string): Promise<void>;
+  patchEntry(bookName: string, entryName: string, ops: PatchOp[]): Promise<{ applied: number; skipped: number; errors: string[] }>;
+
+  parseCommands(text: string): WorldUpdateCommand[];
+  executeCommands(commands: WorldUpdateCommand[], bookName: string): Promise<RouterResult[]>;
+
+  buildFullContext(bookName?: string): Promise<string>;
+  buildSummary(bookName?: string): Promise<string>;
+  buildTriggeredContext(bookName?: string, depth?: number): Promise<string>;
+  scanKeywords(bookName?: string, depth?: number): Promise<KeywordScanResult>;
+
+  verifyBook(bookName?: string, results?: RouterResult[]): Promise<BookSyncResult>;
+  repairBook(bookName?: string, verifyResult?: BookSyncResult, commands?: WorldUpdateCommand[]): Promise<BookSyncResult>;
+
+  getPendingQueue(): PendingReviewItem[];
+  getPendingCount(): number;
   approveAll(ids?: string[]): Promise<void>;
   approveOne(id: string): Promise<void>;
   rejectAll(ids?: string[]): Promise<number>;
   rejectOne(id: string): Promise<number>;
-  getPendingQueue(): ReturnType<WbmPublicApi['listQueue']>;
-  getSnapshots(bookName?: string): ReturnType<WbmPublicApi['listSnapshots']>;
+  getSnapshots(bookName?: string): SnapshotRecord[];
+  cleanupQueue(): number;
+  clearQueue(): number;
+
+  getIsolationInfo(): IsolationInfo;
+  getIsolationStats(bookName?: string): IsolationStats;
+  clearMyIsolation(bookName?: string): number;
+  clearAllIsolation(bookName?: string): number;
+  promoteIsolationToGlobal(bookName?: string): Promise<void>;
 }
+
+export interface WbmLegacyApi extends WbmPublicApi {}
