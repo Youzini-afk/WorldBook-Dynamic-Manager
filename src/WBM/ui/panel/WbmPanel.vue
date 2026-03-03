@@ -27,7 +27,11 @@
       <section v-if="activeTab === 0" key="pane-worldbook" class="wbm-pane">
         <div class="wbm-row">
           <button class="wbm-btn" @click="refreshEntries">刷新</button>
+          <button class="wbm-btn" @click="refreshAiManagedNames">刷新AI标记</button>
           <button class="wbm-btn wbm-btn-primary" @click="manualReview">手动审核</button>
+        </div>
+        <div class="wbm-row">
+          <span class="wbm-chip">AI托管条目 {{ aiManagedNames.length }}</span>
         </div>
         <div class="wbm-card">
           <div class="wbm-row">
@@ -39,13 +43,61 @@
         <div class="wbm-list">
           <div v-for="entry in entries" :key="String(entry.uid ?? entry.id ?? entry.name)" class="wbm-item">
             <div class="wbm-row is-spread">
-              <strong>{{ entry.name || entry.comment || '(未命名)' }}</strong>
+              <div class="wbm-row">
+                <strong>{{ entry.name || entry.comment || '(未命名)' }}</strong>
+                <span v-if="isAiManaged(entry)" class="wbm-chip is-accent">AI托管</span>
+                <span v-if="entry.constant === true" class="wbm-chip">常量</span>
+                <span v-if="entry.selective === false" class="wbm-chip">非选择</span>
+              </div>
               <div class="wbm-row">
                 <button class="wbm-btn wbm-btn-mini" @click="toggleEntry(entry)">
                   {{ entry.enabled === false ? '启用' : '禁用' }}
                 </button>
                 <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="removeEntry(entry)">删除</button>
               </div>
+            </div>
+            <div class="wbm-meta-grid">
+              <input
+                :value="asText(entry.keys)"
+                placeholder="关键词（逗号分隔）"
+                @input="setEntryTextField(entry, 'keys', $event)"
+              />
+              <input
+                :value="asText(entry.secondary_keys)"
+                placeholder="副关键词（逗号分隔）"
+                @input="setEntryTextField(entry, 'secondary_keys', $event)"
+              />
+              <input
+                :value="asText(entry.comment)"
+                placeholder="注释/展示名"
+                @input="setEntryTextField(entry, 'comment', $event)"
+              />
+              <input
+                :value="asText(entry.name)"
+                placeholder="名称"
+                @input="setEntryTextField(entry, 'name', $event)"
+              />
+              <input
+                :value="asText(entry.depth)"
+                type="number"
+                placeholder="depth"
+                @input="setEntryNumberField(entry, 'depth', $event)"
+              />
+              <input
+                :value="asText(entry.order)"
+                type="number"
+                placeholder="order"
+                @input="setEntryNumberField(entry, 'order', $event)"
+              />
+            </div>
+            <div class="wbm-row">
+              <button class="wbm-btn wbm-btn-mini" @click="toggleEntryField(entry, 'constant')">
+                {{ entry.constant === true ? '常量:开' : '常量:关' }}
+              </button>
+              <button class="wbm-btn wbm-btn-mini" @click="toggleEntryField(entry, 'selective')">
+                {{ entry.selective === false ? '选择触发:关' : '选择触发:开' }}
+              </button>
+              <button class="wbm-btn wbm-btn-primary wbm-btn-mini" @click="saveEntry(entry)">保存条目</button>
             </div>
             <textarea
               :value="String(entry.content ?? '')"
@@ -382,6 +434,7 @@ const snapshots = ref(props.bridge.listSnapshots());
 const logs = ref(props.bridge.getLogs());
 const lastError = ref('');
 const promptEntriesText = ref('');
+const aiManagedNames = ref<string[]>([]);
 const apiPresets = ref<ApiPreset[]>([]);
 const promptPresets = ref<PromptPreset[]>([]);
 const selectedApiPresetId = ref('');
@@ -415,6 +468,38 @@ function formatApprovalMode(value: string): string {
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+function asText(value: unknown): string {
+  if (Array.isArray(value)) return value.map(item => String(item)).join(',');
+  if (value == null) return '';
+  return String(value);
+}
+
+function isAiManaged(entry: WorldbookEntryLike): boolean {
+  const name = String(entry.name ?? entry.comment ?? '').trim();
+  if (!name) return false;
+  return aiManagedNames.value.includes(name);
+}
+
+function setEntryTextField(entry: WorldbookEntryLike, field: string, event: Event): void {
+  const next = (event.target as HTMLInputElement).value;
+  entry[field] = next;
+}
+
+function setEntryNumberField(entry: WorldbookEntryLike, field: string, event: Event): void {
+  const raw = (event.target as HTMLInputElement).value;
+  if (!raw.trim()) {
+    delete entry[field];
+    return;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return;
+  entry[field] = Math.floor(value);
+}
+
+function toggleEntryField(entry: WorldbookEntryLike, field: string): void {
+  entry[field] = entry[field] !== true;
 }
 
 function setError(action: string, error: unknown): void {
@@ -457,7 +542,14 @@ async function refreshEntries(): Promise<void> {
     return;
   }
   entries.value = next;
+  await refreshAiManagedNames();
   await refreshStatus();
+}
+
+async function refreshAiManagedNames(): Promise<void> {
+  const next = await runData('刷新 AI 托管标记', () => props.bridge.listAiManagedNames());
+  if (next == null) return;
+  aiManagedNames.value = next;
 }
 
 async function refreshQueue(): Promise<void> {
@@ -641,6 +733,14 @@ async function createEntry(): Promise<void> {
   await refreshEntries();
 }
 
+async function saveEntry(entry: WorldbookEntryLike): Promise<void> {
+  const ok = await runVoid('保存条目', async () => {
+    await props.bridge.updateEntry({ ...entry });
+  });
+  if (!ok) return;
+  await refreshEntries();
+}
+
 async function updateEntryContent(entry: WorldbookEntryLike, event: Event): Promise<void> {
   const target = event.target as HTMLTextAreaElement;
   const ok = await runVoid('更新条目内容', async () => {
@@ -745,6 +845,7 @@ async function refreshForActiveTab(): Promise<void> {
   await refreshStatus();
   if (activeTab.value === 0) {
     await refreshEntries();
+    await refreshAiManagedNames();
     return;
   }
   if (activeTab.value === 1) {
@@ -803,6 +904,7 @@ onMounted(async () => {
   await refreshPromptPresets();
   await refreshBackendChats();
   await refreshIsolation();
+  await refreshAiManagedNames();
   await refreshStatus();
   if (initEntriesError) {
     lastError.value = initEntriesError;
@@ -1005,6 +1107,24 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
 }
+.wbm-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 214, 170, 0.2);
+  background: rgba(56, 47, 40, 0.55);
+  color: var(--wbm-text-sub);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.wbm-chip.is-accent {
+  border-color: rgba(232, 183, 132, 0.48);
+  background: rgba(208, 154, 102, 0.25);
+  color: var(--wbm-text-main);
+}
 .wbm-row.is-spread {
   justify-content: space-between;
 }
@@ -1062,6 +1182,11 @@ onBeforeUnmount(() => {
 }
 .wbm-item.is-small {
   padding: 8px 10px;
+}
+.wbm-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 .wbm-shell input,
 .wbm-shell textarea,
@@ -1302,6 +1427,9 @@ onBeforeUnmount(() => {
   }
   .wbm-body {
     padding: 14px;
+  }
+  .wbm-meta-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

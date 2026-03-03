@@ -20,6 +20,7 @@ export interface PanelBridge {
   getConfig(): WbmConfig;
   saveConfig(next: WbmConfig): Promise<void> | void;
   listEntries(): Promise<WorldbookEntryLike[]>;
+  listAiManagedNames(): string[];
   createEntry(fields: Partial<WorldbookEntryLike>): Promise<void>;
   updateEntry(entry: WorldbookEntryLike): Promise<void>;
   deleteEntry(uid: number | string): Promise<void>;

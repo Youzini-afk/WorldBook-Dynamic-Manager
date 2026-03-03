@@ -68,6 +68,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
   let backendChats: BackendChatRecord[] = [];
   let isolationInfo: IsolationInfo = { chatId: 'chat-1', count: 0, entries: [] };
   let isolationStats: IsolationStats = { totalChats: 1, totalEntries: 0, byChat: [{ chatId: 'chat-1', count: 0 }] };
+  let aiManagedNames: string[] = [];
   let queue: PendingReviewItem[] = [
     {
       id: 'q1',
@@ -108,6 +109,7 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       apiConfig = { ...next };
     }),
     listEntries: vi.fn(async () => entries.map(item => ({ ...item }))),
+    listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     createEntry: vi.fn(async fields => {
       entries.push({ uid: entries.length + 1, ...fields });
     }),

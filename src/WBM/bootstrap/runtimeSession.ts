@@ -86,6 +86,16 @@ function findEntryByName(entries: WorldbookEntryLike[], entryName: string): Worl
   return null;
 }
 
+function findEntryByUid(entries: WorldbookEntryLike[], uid: number | string): WorldbookEntryLike | null {
+  const needle = String(uid);
+  for (const entry of entries) {
+    const currentUid = entry.uid ?? entry.id;
+    if (currentUid == null) continue;
+    if (String(currentUid) === needle) return entry;
+  }
+  return null;
+}
+
 const FULL_ENTRY_TEMPLATE: WorldbookEntryLike = {
   name: '',
   comment: '',
@@ -412,6 +422,10 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       const target = await resolveBookName();
       return await repository.getEntries(target);
     },
+    listAiManagedNames: () => {
+      if (!targetBookName) return [];
+      return aiRegistry.list(targetBookName).map(item => item.entryName);
+    },
     createEntry: async fields => {
       const target = await resolveBookName();
       await repository.addEntry(target, fields);
@@ -424,6 +438,12 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     },
     deleteEntry: async uid => {
       const target = await resolveBookName();
+      if (config.aiRegistryEnabled) {
+        const entries = await repository.getEntries(target);
+        const found = findEntryByUid(entries, uid);
+        const entryName = String(found?.name ?? found?.comment ?? '').trim();
+        if (entryName) aiRegistry.unmark(target, entryName);
+      }
       await repository.deleteEntry(target, uid);
       panel.refresh();
     },
