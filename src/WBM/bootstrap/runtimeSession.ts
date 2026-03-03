@@ -379,6 +379,7 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   const panelBridge: PanelBridge = {
     getStatus: () => getStatus(),
     getConfig: () => ({ ...config }),
+    getApiConfig: () => ({ ...apiConfig }),
     saveConfig: async next => {
       const normalized = parseConfig(next);
       Object.assign(config, normalized);
@@ -395,6 +396,16 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
       rebuildReviewService();
       snapshots.setRetention(config.snapshotRetention);
       backupManager.setRetention(config.snapshotRetention);
+      panel.refresh();
+    },
+    saveApiConfig: async next => {
+      Object.assign(apiConfig, next);
+      config.externalEndpoint = apiConfig.endpoint;
+      config.externalApiKey = apiConfig.key;
+      config.externalModel = apiConfig.model;
+      saveApiConfig(apiConfig, storage ?? undefined);
+      saveConfig(config, storage ?? undefined);
+      rebuildReviewService();
       panel.refresh();
     },
     listEntries: async () => {
@@ -427,11 +438,96 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     },
     listQueue: () => queue.list(),
     listSnapshots: bookName => snapshots.list(bookName),
+    listPromptEntries: () => promptEntryManager.list(),
+    savePromptEntries: async entries => {
+      promptEntryManager.replace(entries);
+      panel.refresh();
+    },
+    listApiPresets: () => apiPresetManager.list(),
+    saveCurrentAsApiPreset: async name => {
+      const presetName = name.trim();
+      if (!presetName) throw new Error('预设名称不能为空');
+      const maybeActive = config.activeApiPreset ? apiPresetManager.get(config.activeApiPreset) : null;
+      const preset = apiPresetManager.upsert(
+        presetName,
+        buildExternalApiConfig(config, apiConfig),
+        maybeActive?.id,
+      );
+      config.activeApiPreset = preset.id;
+      saveConfig(config, storage ?? undefined);
+      panel.refresh();
+    },
+    applyApiPreset: async id => {
+      const preset = apiPresetManager.get(id);
+      if (!preset) throw new Error(`未找到 API 预设: ${id}`);
+      Object.assign(apiConfig, preset.config);
+      config.externalEndpoint = apiConfig.endpoint;
+      config.externalApiKey = apiConfig.key;
+      config.externalModel = apiConfig.model;
+      config.activeApiPreset = id;
+      saveApiConfig(apiConfig, storage ?? undefined);
+      saveConfig(config, storage ?? undefined);
+      rebuildReviewService();
+      panel.refresh();
+    },
+    deleteApiPreset: async id => {
+      apiPresetManager.remove(id);
+      if (config.activeApiPreset === id) {
+        config.activeApiPreset = '';
+        saveConfig(config, storage ?? undefined);
+      }
+      panel.refresh();
+    },
+    listPromptPresets: () => promptPresetManager.list(),
+    saveCurrentAsPromptPreset: async name => {
+      const presetName = name.trim();
+      if (!presetName) throw new Error('预设名称不能为空');
+      const maybeActive = config.activePromptPreset ? promptPresetManager.get(config.activePromptPreset) : null;
+      const preset = promptPresetManager.upsert(presetName, promptEntryManager.list(), maybeActive?.id);
+      config.activePromptPreset = preset.id;
+      saveConfig(config, storage ?? undefined);
+      panel.refresh();
+    },
+    applyPromptPreset: async id => {
+      const preset = promptPresetManager.get(id);
+      if (!preset) throw new Error(`未找到提示词预设: ${id}`);
+      promptEntryManager.replace(preset.entries);
+      config.activePromptPreset = id;
+      saveConfig(config, storage ?? undefined);
+      panel.refresh();
+    },
+    deletePromptPreset: async id => {
+      promptPresetManager.remove(id);
+      if (config.activePromptPreset === id) {
+        config.activePromptPreset = '';
+        saveConfig(config, storage ?? undefined);
+      }
+      panel.refresh();
+    },
     rollback: async snapshotId => {
       await api.rollback(snapshotId);
     },
     rollbackFloor: async (floor, chatId) => {
       await api.rollbackFloor(floor, chatId);
+    },
+    listBackendChats: () => [...backendChats],
+    verifyCurrentBook: async () => {
+      const bookName = await resolveBookName();
+      return await bookSync.verify(bookName);
+    },
+    getIsolationInfo: () => isolation.getCurrentInfo(targetBookName || undefined),
+    getIsolationStats: () => isolation.getStats(targetBookName || undefined),
+    clearMyIsolation: async () => {
+      isolation.clearMine(targetBookName || undefined);
+      panel.refresh();
+    },
+    clearAllIsolation: async () => {
+      isolation.clearAll(targetBookName || undefined);
+      panel.refresh();
+    },
+    promoteIsolationToGlobal: async () => {
+      await api.promoteIsolationToGlobal(targetBookName || undefined);
+      panel.refresh();
     },
     getLogs: () => [...logs],
     clearLogs: () => {

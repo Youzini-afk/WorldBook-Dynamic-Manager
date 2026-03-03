@@ -85,6 +85,34 @@
             <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存设置</button>
           </div>
         </div>
+        <div class="wbm-card">
+          <div class="wbm-row">
+            <button class="wbm-btn" @click="refreshPromptEntries">刷新提示词条目</button>
+            <button class="wbm-btn wbm-btn-primary" @click="savePromptEntries">保存提示词条目</button>
+          </div>
+          <textarea
+            v-model="promptEntriesText"
+            rows="12"
+            placeholder="PromptEntry JSON 数组（id/name/role/content/order/enabled）"
+          ></textarea>
+        </div>
+        <div class="wbm-card">
+          <strong>提示词预设</strong>
+          <div class="wbm-row">
+            <input v-model="newPromptPresetName" placeholder="新提示词预设名称" />
+            <button class="wbm-btn wbm-btn-primary" @click="saveCurrentPromptPreset">保存为预设</button>
+          </div>
+          <div class="wbm-row">
+            <select v-model="selectedPromptPresetId">
+              <option value="">选择提示词预设</option>
+              <option v-for="preset in promptPresets" :key="preset.id" :value="preset.id">
+                {{ preset.name }}
+              </option>
+            </select>
+            <button class="wbm-btn" @click="applyPromptPreset">应用</button>
+            <button class="wbm-btn wbm-btn-danger" @click="deletePromptPreset">删除</button>
+          </div>
+        </div>
       </section>
 
       <section v-else-if="activeTab === 2" key="pane-api" class="wbm-pane">
@@ -99,13 +127,46 @@
             <option value="tavern">酒馆内置（tavern）</option>
             <option value="custom">自定义来源（custom）</option>
           </select>
+          <label>外部 API 类型</label>
+          <select v-model="apiConfig.type">
+            <option value="openai">OpenAI 兼容</option>
+            <option value="custom">Custom JSON</option>
+            <option value="gemini">Gemini</option>
+          </select>
           <label>外部接口地址</label>
-          <input v-model="config.externalEndpoint" />
+          <input v-model="apiConfig.endpoint" />
           <label>外部模型名称</label>
-          <input v-model="config.externalModel" />
+          <input v-model="apiConfig.model" />
           <label>外部 API 密钥</label>
-          <input v-model="config.externalApiKey" />
-          <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存 API</button>
+          <input v-model="apiConfig.key" />
+          <label>最大 tokens</label>
+          <input v-model.number="apiConfig.maxTokens" type="number" min="16" />
+          <label>temperature</label>
+          <input v-model.number="apiConfig.temperature" type="number" min="0" max="2" step="0.01" />
+          <label>top_p</label>
+          <input v-model.number="apiConfig.topP" type="number" min="0" max="1" step="0.01" />
+          <label>超时（ms）</label>
+          <input v-model.number="apiConfig.timeoutMs" type="number" min="1000" />
+          <label>重试次数</label>
+          <input v-model.number="apiConfig.retries" type="number" min="0" />
+          <button class="wbm-btn wbm-btn-primary" @click="saveApiSettings">保存 API</button>
+        </div>
+        <div class="wbm-card">
+          <strong>API 预设</strong>
+          <div class="wbm-row">
+            <input v-model="newApiPresetName" placeholder="新 API 预设名称" />
+            <button class="wbm-btn wbm-btn-primary" @click="saveCurrentApiPreset">保存为预设</button>
+          </div>
+          <div class="wbm-row">
+            <select v-model="selectedApiPresetId">
+              <option value="">选择 API 预设</option>
+              <option v-for="preset in apiPresets" :key="preset.id" :value="preset.id">
+                {{ preset.name }}
+              </option>
+            </select>
+            <button class="wbm-btn" @click="applyApiPreset">应用</button>
+            <button class="wbm-btn wbm-btn-danger" @click="deleteApiPreset">删除</button>
+          </div>
         </div>
       </section>
 
@@ -151,6 +212,47 @@
             <option value="manual">手动审核（manual）</option>
             <option value="selective">选择性审核（selective）</option>
           </select>
+          <label>上下文模式</label>
+          <select v-model="config.contextMode">
+            <option value="full">全量（full）</option>
+            <option value="triggered">命中（triggered）</option>
+            <option value="summary">摘要（summary）</option>
+          </select>
+          <label>过滤模式</label>
+          <select v-model="config.contentFilterMode">
+            <option value="none">不过滤（none）</option>
+            <option value="tags">标签过滤（tags）</option>
+          </select>
+          <label>过滤标签（逗号分隔）</label>
+          <input v-model="config.contentFilterTags" />
+          <label>快照保留数</label>
+          <input v-model.number="config.snapshotRetention" type="number" min="1" />
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">更新需要确认</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.confirmUpdate }"
+              :aria-pressed="config.confirmUpdate ? 'true' : 'false'"
+              @click="config.confirmUpdate = !config.confirmUpdate"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.confirmUpdate ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
+          <div class="wbm-switch-row">
+            <span class="wbm-switch-label">删除联动回滚</span>
+            <button
+              type="button"
+              class="wbm-switch"
+              :class="{ 'is-on': config.syncOnDelete }"
+              :aria-pressed="config.syncOnDelete ? 'true' : 'false'"
+              @click="config.syncOnDelete = !config.syncOnDelete"
+            >
+              <span class="wbm-switch-track"><span class="wbm-switch-thumb"></span></span>
+              <span class="wbm-switch-text">{{ config.syncOnDelete ? '开启' : '关闭' }}</span>
+            </button>
+          </div>
           <button class="wbm-btn wbm-btn-primary" @click="saveConfig">保存调度</button>
         </div>
       </section>
@@ -165,14 +267,45 @@
           <div>下一触发楼层: {{ status.nextDueFloor }}</div>
           <button class="wbm-btn" @click="refreshStatus">刷新状态</button>
         </div>
+        <div class="wbm-card">
+          <div class="wbm-row">
+            <button class="wbm-btn" @click="refreshBackendChats">刷新后台记录</button>
+            <button class="wbm-btn wbm-btn-primary" @click="verifyCurrentBook">验证当前世界书</button>
+          </div>
+          <div v-if="verifyResult" class="wbm-item is-small">
+            校验: {{ verifyResult.ok ? '通过' : '失败' }} |
+            问题数: {{ verifyResult.issueCount }} |
+            时间: {{ verifyResult.checkedAt }}
+          </div>
+          <div v-for="item in backendChats" :key="item.id" class="wbm-item is-small">
+            <div class="wbm-row is-spread">
+              <strong>{{ item.bookName }}</strong>
+              <span>{{ item.success ? '成功' : '失败' }} / 指令 {{ item.commandCount }}</span>
+            </div>
+            <div>{{ item.createdAt }}</div>
+            <div>{{ item.outputPreview || item.error || '(空响应)' }}</div>
+          </div>
+        </div>
       </section>
 
       <section v-else-if="activeTab === 5" key="pane-debug" class="wbm-pane">
         <div class="wbm-row">
           <button class="wbm-btn" @click="refreshQueue">刷新队列</button>
           <button class="wbm-btn" @click="refreshSnapshots">刷新快照</button>
+          <button class="wbm-btn" @click="refreshIsolation">刷新隔离</button>
           <button class="wbm-btn wbm-btn-primary" @click="approveAll">全部通过</button>
           <button class="wbm-btn wbm-btn-danger" @click="rejectAll">全部拒绝</button>
+        </div>
+        <div class="wbm-card">
+          <strong>聊天隔离</strong>
+          <div>当前聊天: {{ isolationInfo.chatId || '(无)' }}</div>
+          <div>当前目标隔离条目: {{ isolationInfo.count }}</div>
+          <div>总聊天数: {{ isolationStats.totalChats }} / 总隔离条目: {{ isolationStats.totalEntries }}</div>
+          <div class="wbm-row">
+            <button class="wbm-btn" @click="clearMyIsolation">清理当前聊天隔离</button>
+            <button class="wbm-btn wbm-btn-danger" @click="clearAllIsolation">清理全部隔离</button>
+            <button class="wbm-btn wbm-btn-primary" @click="promoteIsolationToGlobal">晋升为全局</button>
+          </div>
         </div>
         <div class="wbm-card">
           <strong>审核队列</strong>
@@ -212,7 +345,18 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import type { WbmConfig, WorldbookEntryLike } from '../../core/types';
+import type {
+  ApiPreset,
+  BackendChatRecord,
+  BookSyncResult,
+  IsolationInfo,
+  IsolationStats,
+  PromptEntry,
+  PromptPreset,
+  WbmApiConfig,
+  WbmConfig,
+  WorldbookEntryLike,
+} from '../../core/types';
 import type { PanelBridge } from './types';
 
 const props = defineProps<{ bridge: PanelBridge }>();
@@ -231,11 +375,23 @@ const tabs = [
 const activeTab = ref(0);
 const status = ref(props.bridge.getStatus());
 const config = reactive<WbmConfig>({ ...props.bridge.getConfig() });
+const apiConfig = reactive<WbmApiConfig>({ ...props.bridge.getApiConfig() });
 const entries = ref<WorldbookEntryLike[]>([]);
 const queue = ref(props.bridge.listQueue());
 const snapshots = ref(props.bridge.listSnapshots());
 const logs = ref(props.bridge.getLogs());
 const lastError = ref('');
+const promptEntriesText = ref('');
+const apiPresets = ref<ApiPreset[]>([]);
+const promptPresets = ref<PromptPreset[]>([]);
+const selectedApiPresetId = ref('');
+const selectedPromptPresetId = ref('');
+const newApiPresetName = ref('');
+const newPromptPresetName = ref('');
+const backendChats = ref<BackendChatRecord[]>([]);
+const verifyResult = ref<BookSyncResult | null>(null);
+const isolationInfo = ref<IsolationInfo>(props.bridge.getIsolationInfo());
+const isolationStats = ref<IsolationStats>(props.bridge.getIsolationStats());
 
 const newEntryName = ref('');
 const newEntryContent = ref('');
@@ -323,11 +479,150 @@ async function refreshLogs(): Promise<void> {
   logs.value = next;
 }
 
+async function refreshPromptEntries(): Promise<void> {
+  const next = await runData('刷新提示词条目', () => props.bridge.listPromptEntries());
+  if (next == null) return;
+  promptEntriesText.value = JSON.stringify(next, null, 2);
+}
+
+async function refreshApiPresets(): Promise<void> {
+  const next = await runData('刷新 API 预设', () => props.bridge.listApiPresets());
+  if (next == null) return;
+  apiPresets.value = next;
+}
+
+async function refreshPromptPresets(): Promise<void> {
+  const next = await runData('刷新提示词预设', () => props.bridge.listPromptPresets());
+  if (next == null) return;
+  promptPresets.value = next;
+}
+
+async function refreshBackendChats(): Promise<void> {
+  const next = await runData('刷新后台记录', () => props.bridge.listBackendChats());
+  if (next == null) return;
+  backendChats.value = next;
+}
+
+async function refreshIsolation(): Promise<void> {
+  await runVoid('刷新隔离', () => {
+    isolationInfo.value = props.bridge.getIsolationInfo();
+    isolationStats.value = props.bridge.getIsolationStats();
+  });
+}
+
 async function saveConfig(): Promise<void> {
   await runVoid('保存设置', async () => {
     await props.bridge.saveConfig({ ...config });
     status.value = props.bridge.getStatus();
   });
+}
+
+async function saveApiSettings(): Promise<void> {
+  const ok = await runVoid('保存 API', async () => {
+    await props.bridge.saveApiConfig({ ...apiConfig });
+    await props.bridge.saveConfig({
+      ...config,
+      externalEndpoint: apiConfig.endpoint,
+      externalApiKey: apiConfig.key,
+      externalModel: apiConfig.model,
+    });
+    status.value = props.bridge.getStatus();
+  });
+  if (!ok) return;
+  await refreshApiPresets();
+}
+
+async function savePromptEntries(): Promise<void> {
+  const payload = promptEntriesText.value.trim();
+  if (!payload) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload) as unknown;
+  } catch (error) {
+    setError('保存提示词条目', error);
+    return;
+  }
+  if (!Array.isArray(parsed)) {
+    setError('保存提示词条目', 'JSON 根节点必须是数组');
+    return;
+  }
+
+  const ok = await runVoid('保存提示词条目', async () => {
+    await props.bridge.savePromptEntries(parsed as PromptEntry[]);
+  });
+  if (!ok) return;
+  await refreshPromptEntries();
+}
+
+async function saveCurrentApiPreset(): Promise<void> {
+  const presetName = newApiPresetName.value.trim();
+  if (!presetName) return;
+  const ok = await runVoid('保存 API 预设', async () => {
+    await props.bridge.saveCurrentAsApiPreset(presetName);
+  });
+  if (!ok) return;
+  newApiPresetName.value = '';
+  await refreshApiPresets();
+}
+
+async function applyApiPreset(): Promise<void> {
+  if (!selectedApiPresetId.value) return;
+  const ok = await runVoid('应用 API 预设', async () => {
+    await props.bridge.applyApiPreset(selectedApiPresetId.value);
+  });
+  if (!ok) return;
+  Object.assign(apiConfig, props.bridge.getApiConfig());
+  Object.assign(config, props.bridge.getConfig());
+  status.value = props.bridge.getStatus();
+}
+
+async function deleteApiPreset(): Promise<void> {
+  if (!selectedApiPresetId.value) return;
+  const deletingId = selectedApiPresetId.value;
+  const ok = await runVoid('删除 API 预设', async () => {
+    await props.bridge.deleteApiPreset(deletingId);
+  });
+  if (!ok) return;
+  if (selectedApiPresetId.value === deletingId) selectedApiPresetId.value = '';
+  await refreshApiPresets();
+}
+
+async function saveCurrentPromptPreset(): Promise<void> {
+  const presetName = newPromptPresetName.value.trim();
+  if (!presetName) return;
+  const ok = await runVoid('保存提示词预设', async () => {
+    await props.bridge.saveCurrentAsPromptPreset(presetName);
+  });
+  if (!ok) return;
+  newPromptPresetName.value = '';
+  await refreshPromptPresets();
+}
+
+async function applyPromptPreset(): Promise<void> {
+  if (!selectedPromptPresetId.value) return;
+  const ok = await runVoid('应用提示词预设', async () => {
+    await props.bridge.applyPromptPreset(selectedPromptPresetId.value);
+  });
+  if (!ok) return;
+  await refreshPromptEntries();
+}
+
+async function deletePromptPreset(): Promise<void> {
+  if (!selectedPromptPresetId.value) return;
+  const deletingId = selectedPromptPresetId.value;
+  const ok = await runVoid('删除提示词预设', async () => {
+    await props.bridge.deletePromptPreset(deletingId);
+  });
+  if (!ok) return;
+  if (selectedPromptPresetId.value === deletingId) selectedPromptPresetId.value = '';
+  await refreshPromptPresets();
+}
+
+async function verifyCurrentBook(): Promise<void> {
+  const next = await runData('验证当前世界书', () => props.bridge.verifyCurrentBook());
+  if (next == null) return;
+  verifyResult.value = next;
 }
 
 async function createEntry(): Promise<void> {
@@ -422,19 +717,55 @@ async function clearLogs(): Promise<void> {
   await refreshLogs();
 }
 
+async function clearMyIsolation(): Promise<void> {
+  const ok = await runVoid('清理当前聊天隔离', async () => {
+    await props.bridge.clearMyIsolation();
+  });
+  if (!ok) return;
+  await refreshIsolation();
+}
+
+async function clearAllIsolation(): Promise<void> {
+  const ok = await runVoid('清理全部隔离', async () => {
+    await props.bridge.clearAllIsolation();
+  });
+  if (!ok) return;
+  await refreshIsolation();
+}
+
+async function promoteIsolationToGlobal(): Promise<void> {
+  const ok = await runVoid('晋升隔离条目', async () => {
+    await props.bridge.promoteIsolationToGlobal();
+  });
+  if (!ok) return;
+  await refreshIsolation();
+}
+
 async function refreshForActiveTab(): Promise<void> {
   await refreshStatus();
   if (activeTab.value === 0) {
     await refreshEntries();
     return;
   }
+  if (activeTab.value === 1) {
+    await refreshPromptEntries();
+    await refreshPromptPresets();
+    return;
+  }
+  if (activeTab.value === 2) {
+    await refreshApiPresets();
+    return;
+  }
   if (activeTab.value === 4) {
     await refreshStatus();
+    await refreshBackendChats();
+    await refreshIsolation();
     return;
   }
   if (activeTab.value === 5) {
     await refreshQueue();
     await refreshSnapshots();
+    await refreshIsolation();
     return;
   }
   if (activeTab.value === 6) {
@@ -467,6 +798,11 @@ onMounted(async () => {
   const initLogs = await runData('初始化日志', () => props.bridge.getLogs());
   if (initLogs != null) logs.value = initLogs;
 
+  await refreshPromptEntries();
+  await refreshApiPresets();
+  await refreshPromptPresets();
+  await refreshBackendChats();
+  await refreshIsolation();
   await refreshStatus();
   if (initEntriesError) {
     lastError.value = initEntriesError;

@@ -4,6 +4,13 @@ import { mount, flushPromises, type VueWrapper } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CONFIG } from '../src/WBM/core/config';
 import type {
+  ApiPreset,
+  BackendChatRecord,
+  IsolationInfo,
+  IsolationStats,
+  PromptEntry,
+  PromptPreset,
+  WbmApiConfig,
   PendingReviewItem,
   SnapshotRecord,
   WbmConfig,
@@ -41,9 +48,26 @@ function makeStatus(): WbmStatus {
 }
 
 function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
+  let apiConfig: WbmApiConfig = {
+    type: 'openai',
+    endpoint: 'https://api.example.com',
+    key: 'key',
+    model: 'gpt-4o-mini',
+    maxTokens: 1024,
+    temperature: 0.7,
+    topP: 0.95,
+    timeoutMs: 1000,
+    retries: 1,
+  };
   let entries: WorldbookEntryLike[] = [{ uid: 1, name: '条目A', content: '内容A', enabled: true }];
   let config = makeConfig();
   let status = makeStatus();
+  let promptEntries: PromptEntry[] = [];
+  let apiPresets: ApiPreset[] = [];
+  let promptPresets: PromptPreset[] = [];
+  let backendChats: BackendChatRecord[] = [];
+  let isolationInfo: IsolationInfo = { chatId: 'chat-1', count: 0, entries: [] };
+  let isolationStats: IsolationStats = { totalChats: 1, totalEntries: 0, byChat: [{ chatId: 'chat-1', count: 0 }] };
   let queue: PendingReviewItem[] = [
     {
       id: 'q1',
@@ -76,8 +100,12 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
   const bridge: PanelBridge = {
     getStatus: vi.fn(() => ({ ...status })),
     getConfig: vi.fn(() => ({ ...config })),
+    getApiConfig: vi.fn(() => ({ ...apiConfig })),
     saveConfig: vi.fn(async next => {
       config = { ...next };
+    }),
+    saveApiConfig: vi.fn(async next => {
+      apiConfig = { ...next };
     }),
     listEntries: vi.fn(async () => entries.map(item => ({ ...item }))),
     createEntry: vi.fn(async fields => {
@@ -101,6 +129,63 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
         .filter(item => !bookName || item.bookName === bookName)
         .map(item => ({ ...item, entries: [...item.entries] })),
     ),
+    listPromptEntries: vi.fn(() => promptEntries.map(item => ({ ...item }))),
+    savePromptEntries: vi.fn(async (next: PromptEntry[]) => {
+      promptEntries = next.map(item => ({ ...item }));
+    }),
+    listApiPresets: vi.fn(() => apiPresets.map(item => ({ ...item, config: { ...item.config } }))),
+    saveCurrentAsApiPreset: vi.fn(async (name: string) => {
+      apiPresets = [
+        ...apiPresets,
+        {
+          id: `api-${apiPresets.length + 1}`,
+          name,
+          config: { ...apiConfig },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+    }),
+    applyApiPreset: vi.fn(async () => undefined),
+    deleteApiPreset: vi.fn(async (id: string) => {
+      apiPresets = apiPresets.filter(item => item.id !== id);
+    }),
+    listPromptPresets: vi.fn(() => promptPresets.map(item => ({ ...item, entries: [...item.entries] }))),
+    saveCurrentAsPromptPreset: vi.fn(async (name: string) => {
+      promptPresets = [
+        ...promptPresets,
+        {
+          id: `prompt-${promptPresets.length + 1}`,
+          name,
+          entries: [...promptEntries],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+    }),
+    applyPromptPreset: vi.fn(async () => undefined),
+    deletePromptPreset: vi.fn(async (id: string) => {
+      promptPresets = promptPresets.filter(item => item.id !== id);
+    }),
+    listBackendChats: vi.fn(() => backendChats.map(item => ({ ...item }))),
+    verifyCurrentBook: vi.fn(async () => ({
+      ok: true,
+      checkedAt: new Date().toISOString(),
+      bookName: 'book-A',
+      issueCount: 0,
+      issues: [],
+    })),
+    getIsolationInfo: vi.fn(() => ({ ...isolationInfo, entries: [...isolationInfo.entries] })),
+    getIsolationStats: vi.fn(() => ({ ...isolationStats, byChat: [...isolationStats.byChat] })),
+    clearMyIsolation: vi.fn(async () => {
+      isolationInfo = { ...isolationInfo, count: 0, entries: [] };
+      isolationStats = { ...isolationStats, totalEntries: 0, byChat: [{ chatId: 'chat-1', count: 0 }] };
+    }),
+    clearAllIsolation: vi.fn(async () => {
+      isolationInfo = { ...isolationInfo, count: 0, entries: [] };
+      isolationStats = { ...isolationStats, totalEntries: 0, totalChats: 0, byChat: [] };
+    }),
+    promoteIsolationToGlobal: vi.fn(async () => undefined),
     rollback: vi.fn(async () => undefined),
     rollbackFloor: vi.fn(async () => undefined),
     getLogs: vi.fn(() => logs.map(item => ({ ...item }))),
