@@ -476,7 +476,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
 
   const saveCurrentGlobalPreset = (name: string) => {
     const current = getGlobalWorldbooks();
-    return globalPresetManager.upsert(name, current);
+    const byName = globalPresetManager.findByName(name);
+    return globalPresetManager.upsert(name, current, byName?.id);
   };
 
   const applyGlobalPreset = async (id: string): Promise<string[]> => {
@@ -487,6 +488,17 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
   };
 
   const deleteGlobalPreset = (id: string): boolean => globalPresetManager.remove(id);
+
+  const exportGlobalPresets = (): string => globalPresetManager.exportAll();
+
+  const importGlobalPresets = (payload: string): number => {
+    const imported = globalPresetManager.importAll(payload);
+    if (imported > 0) {
+      logger.info(`全局预设导入完成: ${imported} 条`);
+      panel.refresh();
+    }
+    return imported;
+  };
 
   const exportWorldbook = async (bookName?: string): Promise<string> => {
     const target = await resolveBookName(bookName);
@@ -835,6 +847,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     saveCurrentGlobalPreset: async name => saveCurrentGlobalPreset(name),
     applyGlobalPreset: async id => await applyGlobalPreset(id),
     deleteGlobalPreset: async id => deleteGlobalPreset(id),
+    exportGlobalPresets: () => exportGlobalPresets(),
+    importGlobalPresets: async payload => importGlobalPresets(payload),
     listAiManagedNames: () => {
       if (!targetBookName) return [];
       return aiRegistry.list(targetBookName).map(item => item.entryName);
@@ -1327,6 +1341,8 @@ export function createRuntimeSession(options: RuntimeSessionOptions): RuntimeSes
     saveCurrentGlobalPreset,
     applyGlobalPreset,
     deleteGlobalPreset,
+    exportGlobalPresets,
+    importGlobalPresets,
     exportWorldbook,
     importWorldbookRaw,
     listLockedEntries: bookName => {

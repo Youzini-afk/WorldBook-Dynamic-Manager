@@ -325,6 +325,8 @@ export interface WbmPublicApi {
   saveCurrentGlobalPreset(name: string): GlobalWorldbookPreset;
   applyGlobalPreset(id: string): Promise<string[]>;
   deleteGlobalPreset(id: string): boolean;
+  exportGlobalPresets(): string;
+  importGlobalPresets(payload: string): number;
   exportWorldbook(bookName?: string): Promise<string>;
   importWorldbookRaw(
     bookName: string,

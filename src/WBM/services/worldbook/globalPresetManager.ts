@@ -25,6 +25,10 @@ function normalizeNames(input: string[]): string[] {
   return normalized;
 }
 
+function normalizePresetName(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export class GlobalPresetManager {
   private presets: GlobalWorldbookPreset[];
 
@@ -43,6 +47,13 @@ export class GlobalPresetManager {
 
   get(id: string): GlobalWorldbookPreset | null {
     const found = this.presets.find(item => item.id === id);
+    return found ? clone(found) : null;
+  }
+
+  findByName(name: string): GlobalWorldbookPreset | null {
+    const normalized = normalizePresetName(name);
+    if (!normalized) return null;
+    const found = this.presets.find(item => normalizePresetName(item.name) === normalized);
     return found ? clone(found) : null;
   }
 
@@ -82,5 +93,38 @@ export class GlobalPresetManager {
     if (changed) this.persist();
     return changed;
   }
-}
 
+  exportAll(): string {
+    return JSON.stringify(this.presets, null, 2);
+  }
+
+  importAll(payload: string): number {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return 0;
+    }
+
+    const source = (() => {
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object') {
+        const record = parsed as Record<string, unknown>;
+        if (Array.isArray(record.presets)) return record.presets;
+      }
+      return null;
+    })();
+    if (!source) return 0;
+
+    let changed = 0;
+    for (const raw of source) {
+      const candidate = raw as Partial<GlobalWorldbookPreset>;
+      if (!candidate || typeof candidate.name !== 'string') continue;
+      const books = Array.isArray(candidate.worldbooks) ? candidate.worldbooks : [];
+      const byName = this.findByName(candidate.name);
+      this.upsert(candidate.name, books, candidate.id ?? byName?.id);
+      changed++;
+    }
+    return changed;
+  }
+}

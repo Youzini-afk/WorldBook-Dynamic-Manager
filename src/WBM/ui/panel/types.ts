@@ -32,6 +32,8 @@ export interface PanelBridge {
   saveCurrentGlobalPreset(name: string): Promise<GlobalWorldbookPreset> | GlobalWorldbookPreset;
   applyGlobalPreset(id: string): Promise<string[]>;
   deleteGlobalPreset(id: string): Promise<boolean> | boolean;
+  exportGlobalPresets(): string;
+  importGlobalPresets(payload: string): Promise<number> | number;
   listAiManagedNames(): string[];
   listLockedNames(): string[];
   setEntryLocked(uid: number | string, locked: boolean): Promise<void>;

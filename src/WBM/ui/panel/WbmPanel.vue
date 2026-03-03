@@ -96,6 +96,15 @@
             </select>
             <button class="wbm-btn wbm-btn-mini" @click="applyGlobalPreset">应用预设</button>
             <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="deleteGlobalPreset">删除预设</button>
+            <button class="wbm-btn wbm-btn-mini" @click="exportGlobalPresets">导出预设</button>
+            <button class="wbm-btn wbm-btn-mini" @click="triggerImportGlobalPresets">导入预设</button>
+            <input
+              ref="importGlobalPresetInputRef"
+              type="file"
+              accept=".json,application/json"
+              style="display: none"
+              @change="onImportGlobalPresetsFileChange"
+            />
           </div>
         </div>
         <div class="wbm-card">
@@ -152,6 +161,7 @@
           <span class="wbm-chip">AI托管条目 {{ aiManagedNames.length }}</span>
           <span class="wbm-chip">锁定条目 {{ lockedNames.length }}</span>
           <span class="wbm-chip">已选中 {{ selectedEntryUids.length }}</span>
+          <span v-if="hasDraftChanges" class="wbm-chip is-accent">有未保存修改</span>
         </div>
         <div class="wbm-row">
           <button class="wbm-btn wbm-btn-mini" @click="selectAllEntries">全选</button>
@@ -551,8 +561,19 @@
             <button class="wbm-btn wbm-btn-mini" @click="exportActivationLogs">导出激活日志</button>
             <button class="wbm-btn wbm-btn-danger wbm-btn-mini" @click="clearActivationLogs">清空激活日志</button>
           </div>
-          <div v-if="activationLogs.length === 0" class="wbm-item is-small">暂无激活记录</div>
-          <div v-for="item in activationLogs" :key="item.id" class="wbm-item is-small">
+          <div class="wbm-row">
+            <input v-model="activationSearchKeyword" placeholder="搜索名称/世界书/内容" />
+            <label class="wbm-inline-check">
+              <input v-model="activationOnlyCurrentBook" type="checkbox" />
+              <span>仅当前目标世界书</span>
+            </label>
+          </div>
+          <div class="wbm-row">
+            <span class="wbm-chip">筛选结果 {{ filteredActivationLogs.length }}</span>
+            <span class="wbm-chip">总记录 {{ activationLogs.length }}</span>
+          </div>
+          <div v-if="filteredActivationLogs.length === 0" class="wbm-item is-small">暂无激活记录</div>
+          <div v-for="item in filteredActivationLogs" :key="item.id" class="wbm-item is-small">
             <div class="wbm-row is-spread">
               <strong>{{ item.name }}</strong>
               <span>{{ item.time }}</span>
@@ -711,6 +732,7 @@ const apiConfig = reactive<WbmApiConfig>({ ...props.bridge.getApiConfig() });
 const entries = ref<WorldbookEntryLike[]>([]);
 const worldbookOptions = ref<string[]>([]);
 const selectedWorldbookName = ref('');
+const hasDraftChanges = ref(false);
 const globalBindings = ref<string[]>([]);
 const globalBindingCandidate = ref('');
 const globalPresets = ref<GlobalWorldbookPreset[]>([]);
@@ -734,6 +756,8 @@ const backendChats = ref<BackendChatRecord[]>([]);
 const selectedBackendId = ref('');
 const verifyResult = ref<BookSyncResult | null>(null);
 const activationLogs = ref<ActivationLogRecord[]>([]);
+const activationSearchKeyword = ref('');
+const activationOnlyCurrentBook = ref(false);
 const isolationInfo = ref<IsolationInfo>(props.bridge.getIsolationInfo());
 const isolationStats = ref<IsolationStats>(props.bridge.getIsolationStats());
 
@@ -742,6 +766,7 @@ const newEntryContent = ref('');
 const importTargetBookName = ref('');
 const importConflictPolicy = ref<ImportConflictPolicy>('overwrite');
 const importFileInputRef = ref<HTMLInputElement | null>(null);
+const importGlobalPresetInputRef = ref<HTMLInputElement | null>(null);
 
 const findQuery = ref('');
 const replaceText = ref('');
@@ -778,6 +803,21 @@ const logsText = computed(() =>
 const selectedBackendRecord = computed<BackendChatRecord | null>(
   () => backendChats.value.find(item => item.id === selectedBackendId.value) ?? null,
 );
+
+const filteredActivationLogs = computed(() => {
+  const keyword = activationSearchKeyword.value.trim().toLowerCase();
+  const currentBook = (selectedWorldbookName.value || status.value.targetBookName || '').trim();
+  return activationLogs.value.filter(item => {
+    if (activationOnlyCurrentBook.value && currentBook) {
+      if ((item.bookName || '').trim() !== currentBook) return false;
+    }
+    if (!keyword) return true;
+    const haystack = [item.name, item.bookName, item.preview, item.uid, item.time]
+      .map(value => String(value ?? '').toLowerCase())
+      .join('\n');
+    return haystack.includes(keyword);
+  });
+});
 
 const worldbookVersionOptions = computed<DiffVersionOption[]>(() => {
   const current: DiffVersionOption = {
@@ -1088,21 +1128,25 @@ function replacePlainText(text: string, needle: string, replacement: string): st
 function setEntryTextField(entry: WorldbookEntryLike, field: string, event: Event): void {
   const next = (event.target as HTMLInputElement).value;
   entry[field] = next;
+  hasDraftChanges.value = true;
 }
 
 function setEntryNumberField(entry: WorldbookEntryLike, field: string, event: Event): void {
   const raw = (event.target as HTMLInputElement).value;
   if (!raw.trim()) {
     delete entry[field];
+    hasDraftChanges.value = true;
     return;
   }
   const value = Number(raw);
   if (!Number.isFinite(value)) return;
   entry[field] = Math.floor(value);
+  hasDraftChanges.value = true;
 }
 
 function toggleEntryField(entry: WorldbookEntryLike, field: string): void {
   entry[field] = entry[field] !== true;
+  hasDraftChanges.value = true;
 }
 
 function setError(action: string, error: unknown): void {
@@ -1135,11 +1179,14 @@ async function refreshStatus(): Promise<void> {
   await runVoid('刷新状态', () => {
     status.value = props.bridge.getStatus();
     const resolvedTarget = status.value.targetBookName?.trim() ?? '';
-    if (resolvedTarget) {
+    if (resolvedTarget && !hasDraftChanges.value) {
       selectedWorldbookName.value = resolvedTarget;
-      if (!importTargetBookName.value) {
-        importTargetBookName.value = resolvedTarget;
+      if (!worldbookOptions.value.includes(resolvedTarget)) {
+        worldbookOptions.value = [resolvedTarget, ...worldbookOptions.value];
       }
+    }
+    if (resolvedTarget && !importTargetBookName.value) {
+      importTargetBookName.value = resolvedTarget;
     }
   });
 }
@@ -1150,9 +1197,11 @@ async function refreshEntries(): Promise<void> {
     // 拉取失败时清空列表，避免继续展示旧聊天/旧角色的残留条目。
     entries.value = [];
     selectedEntryUids.value = [];
+    hasDraftChanges.value = false;
     return;
   }
   entries.value = next;
+  hasDraftChanges.value = false;
   const available = new Set(next.map(item => getEntryUid(item)).filter(Boolean));
   selectedEntryUids.value = selectedEntryUids.value.filter(uid => available.has(uid));
   await refreshLockedNames();
@@ -1163,7 +1212,10 @@ async function refreshEntries(): Promise<void> {
 async function refreshWorldbookOptions(): Promise<void> {
   const next = await runData('刷新可选世界书', () => props.bridge.listWorldbookNames(config.targetType));
   if (next == null) return;
-  const selected = config.targetBookName.trim();
+  const resolved = status.value.targetBookName?.trim() ?? '';
+  const configured = config.targetBookName.trim();
+  const preferred = resolved || configured;
+  const current = selectedWorldbookName.value.trim();
   const dedup = new Set<string>();
   const normalized = next
     .map(item => item.trim())
@@ -1173,9 +1225,14 @@ async function refreshWorldbookOptions(): Promise<void> {
       dedup.add(item);
       return true;
     });
-  if (selected && !dedup.has(selected)) normalized.unshift(selected);
+  if (preferred && !dedup.has(preferred)) normalized.unshift(preferred);
   worldbookOptions.value = normalized;
-  selectedWorldbookName.value = selected || normalized[0] || '';
+  if (hasDraftChanges.value) return;
+  if (current && dedup.has(current)) {
+    selectedWorldbookName.value = current;
+    return;
+  }
+  selectedWorldbookName.value = preferred || normalized[0] || '';
 }
 
 async function refreshGlobalBindings(): Promise<void> {
@@ -1371,6 +1428,35 @@ async function deleteGlobalPreset(): Promise<void> {
     return;
   }
   selectedGlobalPresetId.value = '';
+  await refreshGlobalPresets();
+}
+
+async function exportGlobalPresets(): Promise<void> {
+  await runVoid('导出全局预设', () => {
+    const raw = props.bridge.exportGlobalPresets();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    downloadJsonFile(`wbm3-global-presets-${stamp}.json`, raw);
+  });
+}
+
+function triggerImportGlobalPresets(): void {
+  importGlobalPresetInputRef.value?.click();
+}
+
+async function onImportGlobalPresetsFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  const imported = await runData('导入全局预设', async () => {
+    const raw = await readFileAsText(file);
+    return await props.bridge.importGlobalPresets(raw);
+  });
+  if (imported == null) return;
+  if (imported <= 0) {
+    setError('导入全局预设', '未导入任何预设（文件为空或格式不正确）');
+    return;
+  }
   await refreshGlobalPresets();
 }
 
@@ -1936,15 +2022,18 @@ async function exportActivationLogs(): Promise<void> {
   });
 }
 
-async function refreshForActiveTab(): Promise<void> {
+async function refreshForActiveTab(options?: { forceEntries?: boolean }): Promise<void> {
+  const forceEntries = options?.forceEntries === true;
   await refreshStatus();
   if (activeTab.value === 0) {
     await refreshWorldbookOptions();
     await refreshGlobalBindings();
     await refreshGlobalPresets();
-    await refreshEntries();
-    await refreshLockedNames();
-    await refreshAiManagedNames();
+    if (forceEntries || !hasDraftChanges.value) {
+      await refreshEntries();
+      await refreshLockedNames();
+      await refreshAiManagedNames();
+    }
     return;
   }
   if (activeTab.value === 1) {
@@ -1975,11 +2064,11 @@ async function refreshForActiveTab(): Promise<void> {
 }
 
 function handlePanelRefreshEvent(): void {
-  void refreshForActiveTab();
+  void refreshForActiveTab({ forceEntries: false });
 }
 
 watch(activeTab, () => {
-  void refreshForActiveTab();
+  void refreshForActiveTab({ forceEntries: false });
 });
 
 watch(

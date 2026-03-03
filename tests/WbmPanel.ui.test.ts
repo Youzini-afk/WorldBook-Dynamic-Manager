@@ -150,6 +150,35 @@ function makeBridge(overrides: Partial<PanelBridge> = {}): PanelBridge {
       globalPresets = globalPresets.filter(item => item.id !== id);
       return globalPresets.length !== before;
     }),
+    exportGlobalPresets: vi.fn(() => JSON.stringify(globalPresets, null, 2)),
+    importGlobalPresets: vi.fn((payload: string) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(payload);
+      } catch {
+        return 0;
+      }
+      const source = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === 'object' && Array.isArray((parsed as { presets?: unknown[] }).presets)
+          ? (parsed as { presets: unknown[] }).presets
+          : [];
+      if (source.length === 0) return 0;
+      for (const raw of source) {
+        const item = raw as Partial<GlobalWorldbookPreset>;
+        if (!item || typeof item.name !== 'string') continue;
+        const existing = globalPresets.find(preset => preset.name === item.name);
+        const next: GlobalWorldbookPreset = {
+          id: item.id ?? existing?.id ?? `global-${globalPresets.length + 1}`,
+          name: item.name,
+          worldbooks: Array.isArray(item.worldbooks) ? [...item.worldbooks] : [],
+          createdAt: item.createdAt ?? new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        globalPresets = [...globalPresets.filter(preset => preset.id !== next.id), next];
+      }
+      return source.length;
+    }),
     listAiManagedNames: vi.fn(() => [...aiManagedNames]),
     listLockedNames: vi.fn(() => [...lockedNames]),
     setEntryLocked: vi.fn(async (uid: number | string, locked: boolean) => {
@@ -310,6 +339,10 @@ async function clickButton(wrapper: VueWrapper<unknown>, label: string): Promise
   expect(button, `button not found: ${label}`).toBeDefined();
   await button!.trigger('click');
   await flushPromises();
+}
+
+function findTargetWorldbookSelect(wrapper: VueWrapper<unknown>) {
+  return wrapper.findAll('select').find(item => item.text().includes('（未选择）'));
 }
 
 describe('WbmPanel UI', () => {
@@ -505,5 +538,94 @@ describe('WbmPanel UI', () => {
 
     expect(listEntries).toHaveBeenCalledTimes(2);
     expect(wrapper.text()).toContain('条目B');
+  });
+
+  it('外部刷新时在无草稿情况下应自动同步上下文目标世界书', async () => {
+    const status = makeStatus();
+    status.targetBookName = 'book-A';
+    const bridge = makeBridge({
+      getStatus: vi.fn(() => ({ ...status })),
+      listWorldbookNames: vi.fn(async () => ['book-A', 'book-B']),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    const select = findTargetWorldbookSelect(wrapper);
+    expect(select).toBeDefined();
+    expect((select!.element as HTMLSelectElement).value).toBe('book-A');
+
+    status.targetBookName = 'book-B';
+    window.dispatchEvent(new CustomEvent('wbm3:panel-refresh'));
+    await flushPromises();
+
+    expect((select!.element as HTMLSelectElement).value).toBe('book-B');
+  });
+
+  it('存在未保存草稿时应跳过外部刷新触发的自动切书', async () => {
+    const status = makeStatus();
+    status.targetBookName = 'book-A';
+    const bridge = makeBridge({
+      getStatus: vi.fn(() => ({ ...status })),
+      listWorldbookNames: vi.fn(async () => ['book-A', 'book-B']),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    const select = findTargetWorldbookSelect(wrapper);
+    expect(select).toBeDefined();
+    expect((select!.element as HTMLSelectElement).value).toBe('book-A');
+
+    await wrapper.find('input[placeholder="名称"]').setValue('条目A-草稿');
+
+    status.targetBookName = 'book-B';
+    window.dispatchEvent(new CustomEvent('wbm3:panel-refresh'));
+    await flushPromises();
+
+    expect((select!.element as HTMLSelectElement).value).toBe('book-A');
+    expect(wrapper.text()).toContain('有未保存修改');
+  });
+
+  it('激活监控支持关键字筛选与仅当前书过滤', async () => {
+    const bridge = makeBridge({
+      listActivationLogs: vi.fn(() => [
+        {
+          id: 'a1',
+          time: new Date().toISOString(),
+          bookName: 'book-A',
+          uid: '1',
+          name: '条目A',
+          preview: 'alpha content',
+          source: 'world_info_activated' as const,
+        },
+        {
+          id: 'a2',
+          time: new Date().toISOString(),
+          bookName: 'book-B',
+          uid: '2',
+          name: '条目B',
+          preview: 'beta content',
+          source: 'world_info_activated' as const,
+        },
+      ]),
+    });
+    const wrapper = mount(WbmPanel, { props: { bridge } });
+    await flushPromises();
+
+    await clickTab(wrapper, '调试');
+    const getActivationCard = () =>
+      wrapper.findAll('.wbm-card').find(item => item.text().includes('激活监控（WORLD_INFO_ACTIVATED）'));
+    const card = getActivationCard();
+    expect(card).toBeDefined();
+    expect(card!.text()).toContain('条目A');
+    expect(card!.text()).toContain('条目B');
+
+    await wrapper.find('input[placeholder="搜索名称/世界书/内容"]').setValue('beta');
+    await flushPromises();
+    expect(card!.text()).not.toContain('条目A');
+    expect(card!.text()).toContain('条目B');
+
+    await card!.find('input[type="checkbox"]').setValue(true);
+    await flushPromises();
+    expect(card!.text()).not.toContain('条目B');
   });
 });
