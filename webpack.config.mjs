@@ -48,7 +48,7 @@ function makeCommon(isProd) {
         },
       ],
     },
-    devtool: isProd ? 'source-map' : 'eval-source-map',
+    devtool: isProd ? false : 'eval-source-map',
     plugins: makePlugins(),
     optimization: {
       minimize: isProd,
@@ -91,4 +91,3 @@ const config = (_env, argv) => {
 };
 
 export default config;
-
